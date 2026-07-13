@@ -48,6 +48,18 @@ TURSO_AUTH_TOKEN=seu-token
 
 O token é utilizado somente pelo servidor e nunca deve receber o prefixo `NEXT_PUBLIC_`.
 
+## Acesso restrito
+
+O portal, suas consultas e APIs exigem uma sessão válida. Usuários e sessões ficam nas tabelas `app_users` e `app_sessions` do Turso. As senhas são derivadas com `scrypt`; o navegador recebe somente um token aleatório em cookie `HttpOnly`.
+
+Depois de migrar o banco, crie o primeiro usuário administrativo:
+
+```bash
+npm run auth:create-user -- "admin@exemplo.com" "Administrador"
+```
+
+A senha será solicitada e ocultada no terminal. Executar novamente para o mesmo e-mail atualiza nome e senha do usuário.
+
 ## Instalação e execução
 
 Instale as dependências:
@@ -95,6 +107,8 @@ O banco contém as seguintes tabelas:
 - `pcasp_extended_2026`: contas e naturezas do PCASP Estendido 2026.
 - `official_fiscal_documents`: metadados dos documentos fiscais oficiais.
 - `official_fiscal_rules`: regras fiscais oficiais exibidas pela aplicação.
+- `app_users`: usuários autorizados e hashes das senhas.
+- `app_sessions`: sessões ativas com expiração.
 
 As tabelas e os índices são inicializados por `lib/rules-db.ts`. Os registros de natureza contábil e o pacote de regras fiscais oficiais são atualizados automaticamente durante essa inicialização. Não é necessário nem recomendado criar um arquivo `.sqlite` no filesystem da Vercel.
 
@@ -176,6 +190,7 @@ lib/
   zip-csv.ts                   Extração e leitura de CSV dentro de ZIP
 scripts/
   import-comparison-rules.mjs  Importação do checklist STN
+  create-user.mjs              Criação e redefinição de usuário administrativo
   migrate-db.mjs               Migração explícita do banco Turso
   migrate-local-sqlite.mjs     Carga única do antigo SQLite local
   import-msc-layout.mjs        Importação do leiaute MSC e PCASP

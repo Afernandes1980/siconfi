@@ -109,4 +109,29 @@ export const DATABASE_SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_official_fiscal_rules_category
     ON official_fiscal_rules (category);
+
+  CREATE TABLE IF NOT EXISTS app_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS app_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id
+    ON app_sessions (user_id);
+
+  CREATE INDEX IF NOT EXISTS idx_app_sessions_expires_at
+    ON app_sessions (expires_at);
 `;
