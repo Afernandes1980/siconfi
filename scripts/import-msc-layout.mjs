@@ -1,11 +1,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { DatabaseSync } from "node:sqlite";
 import xlsx from "xlsx";
+import { database, executeInBatches } from "./turso-client.mjs";
 
 const inputFile = process.argv[2];
-const dbPath = path.join(process.cwd(), "data", "siconfi.sqlite");
 
 if (!inputFile || !existsSync(inputFile)) {
   console.error(`Arquivo nao encontrado: ${inputFile || "(nao informado)"}`);
@@ -14,9 +13,8 @@ if (!inputFile || !existsSync(inputFile)) {
 
 const sourceFile = path.basename(inputFile);
 const workbook = xlsx.readFile(inputFile, { cellDates: false });
-const db = new DatabaseSync(dbPath);
 
-db.exec(`
+await database.exec(`
   CREATE TABLE IF NOT EXISTS msc_layout_sheets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sheet_name TEXT NOT NULL,
@@ -57,15 +55,15 @@ db.exec(`
     ON pcasp_extended_2026 (normalized_nature);
 `);
 
-const insertRawRow = db.prepare(`
+const insertRawRowSql = `
   INSERT INTO msc_layout_sheets (sheet_name, row_number, row_json, source_file)
-  VALUES (?, ?, ?, ?)
+  VALUES (:sheetName, :rowNumber, :rowJson, :sourceFile)
   ON CONFLICT(sheet_name, row_number, source_file) DO UPDATE SET
     row_json = excluded.row_json,
     imported_at = CURRENT_TIMESTAMP
-`);
+`;
 
-const upsertPcasp = db.prepare(`
+const upsertPcaspSql = `
   INSERT INTO pcasp_extended_2026 (
     account,
     class,
@@ -86,7 +84,26 @@ const upsertPcasp = db.prepare(`
     complementary_info,
     source_file
   )
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  VALUES (
+    :account,
+    :classValue,
+    :groupCode,
+    :subgroup,
+    :titleCode,
+    :subtitle,
+    :item,
+    :subitem,
+    :title,
+    :functionDescription,
+    :balanceNature,
+    :normalizedNature,
+    :status,
+    :detailedLevel,
+    :financialSurplusIndicator,
+    :complementaryInfoId,
+    :complementaryInfo,
+    :sourceFile
+  )
   ON CONFLICT(account) DO UPDATE SET
     class = excluded.class,
     group_code = excluded.group_code,
@@ -106,19 +123,27 @@ const upsertPcasp = db.prepare(`
     complementary_info = excluded.complementary_info,
     source_file = excluded.source_file,
     updated_at = CURRENT_TIMESTAMP
-`);
+`;
 
 let rawRows = 0;
 let pcaspRows = 0;
-
-db.exec("BEGIN");
+const rawStatements = [];
+const pcaspStatements = [];
 
 try {
   for (const sheetName of workbook.SheetNames) {
     const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
 
     rows.forEach((row, index) => {
-      insertRawRow.run(sheetName, index + 1, JSON.stringify(row.map(clean)), sourceFile);
+      rawStatements.push({
+        sql: insertRawRowSql,
+        args: {
+          sheetName,
+          rowNumber: index + 1,
+          rowJson: JSON.stringify(row.map(clean)),
+          sourceFile,
+        },
+      });
       rawRows += 1;
     });
 
@@ -128,42 +153,45 @@ try {
         if (!account) continue;
 
         const balanceNature = clean(row[10]);
-        upsertPcasp.run(
-          account,
-          clean(row[0]),
-          clean(row[1]),
-          clean(row[2]),
-          clean(row[3]),
-          clean(row[4]),
-          clean(row[5]),
-          clean(row[6]),
-          clean(row[8]),
-          clean(row[9]),
-          balanceNature,
-          normalizeBalanceNature(balanceNature),
-          clean(row[11]),
-          clean(row[12]),
-          clean(row[13]),
-          clean(row[14]),
-          clean(row[15]),
-          sourceFile,
-        );
+        pcaspStatements.push({
+          sql: upsertPcaspSql,
+          args: {
+            account,
+            classValue: clean(row[0]),
+            groupCode: clean(row[1]),
+            subgroup: clean(row[2]),
+            titleCode: clean(row[3]),
+            subtitle: clean(row[4]),
+            item: clean(row[5]),
+            subitem: clean(row[6]),
+            title: clean(row[8]),
+            functionDescription: clean(row[9]),
+            balanceNature,
+            normalizedNature: normalizeBalanceNature(balanceNature),
+            status: clean(row[11]),
+            detailedLevel: clean(row[12]),
+            financialSurplusIndicator: clean(row[13]),
+            complementaryInfoId: clean(row[14]),
+            complementaryInfo: clean(row[15]),
+            sourceFile,
+          },
+        });
         pcaspRows += 1;
       }
     }
   }
 
-  db.exec("COMMIT");
+  await executeInBatches(rawStatements);
+  await executeInBatches(pcaspStatements);
 } catch (error) {
-  db.exec("ROLLBACK");
   throw error;
 } finally {
-  db.close();
+  await database.close();
 }
 
 console.log(`Linhas brutas importadas/atualizadas: ${rawRows}`);
 console.log(`Contas PCASP importadas/atualizadas: ${pcaspRows}`);
-console.log(`Banco: ${dbPath}`);
+console.log("Banco: Turso");
 
 function clean(value) {
   return String(value ?? "").trim();
