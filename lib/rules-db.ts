@@ -1,6 +1,3 @@
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import {
   OFFICIAL_FISCAL_DOCUMENTS,
   OFFICIAL_FISCAL_PACKAGE_LABEL,
@@ -8,6 +5,7 @@ import {
   type OfficialFiscalDocument,
   type OfficialFiscalRule,
 } from "@/lib/official-fiscal-rules";
+import { DATABASE_SCHEMA, database } from "@/lib/turso";
 
 export type StoredComparisonRule = {
   id: number;
@@ -42,124 +40,26 @@ export type StoredOfficialFiscalRule = OfficialFiscalRule & {
   packageLabel: string;
 };
 
-const DB_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DB_DIR, "siconfi.sqlite");
+let initialization: Promise<void> | null = null;
 
-let database: DatabaseSync | null = null;
-
-export function getDatabase() {
-  mkdirSync(DB_DIR, { recursive: true });
-
-  if (!database) {
-    database = new DatabaseSync(DB_PATH);
-    initializeDatabase(database);
+export function initializeDatabase() {
+  if (!initialization) {
+    initialization = initialize().catch((error) => {
+      initialization = null;
+      throw error;
+    });
   }
 
-  return database;
+  return initialization;
 }
 
-export function initializeDatabase(db = getDatabase()) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS comparison_rules (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      dimension TEXT NOT NULL,
-      code TEXT NOT NULL UNIQUE,
-      item TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'PENDENTE',
-      source_file TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_comparison_rules_dimension
-      ON comparison_rules (dimension);
-
-    CREATE INDEX IF NOT EXISTS idx_comparison_rules_status
-      ON comparison_rules (status);
-
-    CREATE TABLE IF NOT EXISTS account_natures (
-      account_class TEXT PRIMARY KEY,
-      nature TEXT NOT NULL CHECK (nature IN ('D', 'C')),
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS msc_layout_sheets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sheet_name TEXT NOT NULL,
-      row_number INTEGER NOT NULL,
-      row_json TEXT NOT NULL,
-      source_file TEXT NOT NULL,
-      imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(sheet_name, row_number, source_file)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_msc_layout_sheets_sheet
-      ON msc_layout_sheets (sheet_name);
-
-    CREATE TABLE IF NOT EXISTS pcasp_extended_2026 (
-      account TEXT PRIMARY KEY,
-      class TEXT NOT NULL,
-      group_code TEXT NOT NULL,
-      subgroup TEXT NOT NULL,
-      title_code TEXT NOT NULL,
-      subtitle TEXT NOT NULL,
-      item TEXT NOT NULL,
-      subitem TEXT NOT NULL,
-      title TEXT NOT NULL,
-      function_description TEXT NOT NULL,
-      balance_nature TEXT NOT NULL,
-      normalized_nature TEXT NOT NULL,
-      status TEXT NOT NULL,
-      detailed_level TEXT NOT NULL,
-      financial_surplus_indicator TEXT NOT NULL,
-      complementary_info_id TEXT NOT NULL,
-      complementary_info TEXT NOT NULL,
-      source_file TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_pcasp_extended_2026_normalized_nature
-      ON pcasp_extended_2026 (normalized_nature);
-
-    CREATE TABLE IF NOT EXISTS official_fiscal_documents (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      report TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      exercise INTEGER NOT NULL,
-      file_name TEXT NOT NULL,
-      official_path TEXT NOT NULL,
-      package_label TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS official_fiscal_rules (
-      code TEXT PRIMARY KEY,
-      report TEXT NOT NULL,
-      category TEXT NOT NULL,
-      severity TEXT NOT NULL,
-      description TEXT NOT NULL,
-      source_document_ids TEXT NOT NULL,
-      package_label TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_official_fiscal_rules_report
-      ON official_fiscal_rules (report);
-
-    CREATE INDEX IF NOT EXISTS idx_official_fiscal_rules_category
-      ON official_fiscal_rules (category);
-  `);
-
-  seedAccountNatures(db);
-  seedOfficialFiscalPackage(db);
+async function initialize() {
+  await database.exec(DATABASE_SCHEMA);
+  await seedAccountNatures();
+  await seedOfficialFiscalPackage();
 }
 
-function seedAccountNatures(db: DatabaseSync) {
+async function seedAccountNatures() {
   const defaults: AccountNature[] = [
     { accountClass: "1", nature: "D" },
     { accountClass: "2", nature: "C" },
@@ -171,46 +71,107 @@ function seedAccountNatures(db: DatabaseSync) {
     { accountClass: "8", nature: "C" },
   ];
 
-  const upsert = db.prepare(`
-    INSERT INTO account_natures (account_class, nature)
-    VALUES (?, ?)
-    ON CONFLICT(account_class) DO UPDATE SET
-      nature = excluded.nature,
-      updated_at = CURRENT_TIMESTAMP
+  await database.batch(
+    defaults.map((item) => ({
+      sql: `
+        INSERT INTO account_natures (account_class, nature)
+        VALUES (:accountClass, :nature)
+        ON CONFLICT(account_class) DO UPDATE SET
+          nature = excluded.nature,
+          updated_at = CURRENT_TIMESTAMP
+      `,
+      args: { accountClass: item.accountClass, nature: item.nature },
+    })),
+    "immediate",
+  );
+}
+
+async function seedOfficialFiscalPackage() {
+  await database.batch(
+    [
+      ...OFFICIAL_FISCAL_DOCUMENTS.map((document) => ({
+        sql: `
+          INSERT INTO official_fiscal_documents (
+            id, title, report, kind, exercise, file_name, official_path, package_label
+          ) VALUES (
+            :id, :title, :report, :kind, :exercise, :fileName, :officialPath, :packageLabel
+          )
+          ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            report = excluded.report,
+            kind = excluded.kind,
+            exercise = excluded.exercise,
+            file_name = excluded.file_name,
+            official_path = excluded.official_path,
+            package_label = excluded.package_label,
+            updated_at = CURRENT_TIMESTAMP
+        `,
+        args: {
+          id: document.id,
+          title: document.title,
+          report: document.report,
+          kind: document.kind,
+          exercise: document.exercise,
+          fileName: document.fileName,
+          officialPath: document.officialPath,
+          packageLabel: OFFICIAL_FISCAL_PACKAGE_LABEL,
+        },
+      })),
+      ...OFFICIAL_FISCAL_RULES.map((rule) => ({
+        sql: `
+          INSERT INTO official_fiscal_rules (
+            code, report, category, severity, description, source_document_ids, package_label
+          ) VALUES (
+            :code, :report, :category, :severity, :description, :sourceDocumentIds, :packageLabel
+          )
+          ON CONFLICT(code) DO UPDATE SET
+            report = excluded.report,
+            category = excluded.category,
+            severity = excluded.severity,
+            description = excluded.description,
+            source_document_ids = excluded.source_document_ids,
+            package_label = excluded.package_label,
+            updated_at = CURRENT_TIMESTAMP
+        `,
+        args: {
+          code: rule.code,
+          report: rule.report,
+          category: rule.category,
+          severity: rule.severity,
+          description: rule.description,
+          sourceDocumentIds: JSON.stringify(rule.sourceDocumentIds),
+          packageLabel: OFFICIAL_FISCAL_PACKAGE_LABEL,
+        },
+      })),
+    ],
+    "immediate",
+  );
+}
+
+export async function listComparisonRules() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT
+      id,
+      dimension,
+      code,
+      item,
+      status,
+      source_file AS sourceFile,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM comparison_rules
+    ORDER BY dimension, code
   `);
 
-  for (const item of defaults) {
-    upsert.run(item.accountClass, item.nature);
-  }
+  return result.rows as unknown as StoredComparisonRule[];
 }
 
-export function listComparisonRules() {
-  const db = getDatabase();
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          id,
-          dimension,
-          code,
-          item,
-          status,
-          source_file AS sourceFile,
-          created_at AS createdAt,
-          updated_at AS updatedAt
-        FROM comparison_rules
-        ORDER BY dimension, code
-      `,
-    )
-    .all() as StoredComparisonRule[];
-
-  return rows;
-}
-
-export function upsertComparisonRule(rule: Omit<StoredComparisonRule, "id" | "createdAt" | "updatedAt">) {
-  const db = getDatabase();
-
-  db.prepare(
+export async function upsertComparisonRule(
+  rule: Omit<StoredComparisonRule, "id" | "createdAt" | "updatedAt">,
+) {
+  await initializeDatabase();
+  await database.execute(
     `
       INSERT INTO comparison_rules (dimension, code, item, status, source_file)
       VALUES (?, ?, ?, ?, ?)
@@ -221,178 +182,89 @@ export function upsertComparisonRule(rule: Omit<StoredComparisonRule, "id" | "cr
         source_file = excluded.source_file,
         updated_at = CURRENT_TIMESTAMP
     `,
-  ).run(rule.dimension, rule.code, rule.item, rule.status, rule.sourceFile);
+    [rule.dimension, rule.code, rule.item, rule.status, rule.sourceFile],
+  );
 }
 
-export function getComparisonRulesSummary() {
-  const db = getDatabase();
-  const rows = db
-    .prepare(
-      `
-        SELECT dimension, status, COUNT(*) AS total
-        FROM comparison_rules
-        GROUP BY dimension, status
-        ORDER BY dimension, status
-      `,
-    )
-    .all() as Array<{ dimension: string; status: string; total: number }>;
+export async function getComparisonRulesSummary() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT dimension, status, COUNT(*) AS total
+    FROM comparison_rules
+    GROUP BY dimension, status
+    ORDER BY dimension, status
+  `);
 
-  return rows;
+  return result.rows as unknown as Array<{ dimension: string; status: string; total: number }>;
 }
 
-export function listAccountNatures() {
-  const db = getDatabase();
+export async function listAccountNatures() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT account_class AS accountClass, nature
+    FROM account_natures
+    ORDER BY account_class
+  `);
 
-  return db
-    .prepare(
-      `
-        SELECT
-          account_class AS accountClass,
-          nature
-        FROM account_natures
-        ORDER BY account_class
-      `,
-    )
-    .all() as AccountNature[];
+  return result.rows as unknown as AccountNature[];
 }
 
-export function listPcaspAccounts() {
-  const db = getDatabase();
+export async function listPcaspAccounts() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT
+      account,
+      title,
+      balance_nature AS balanceNature,
+      normalized_nature AS normalizedNature,
+      status,
+      detailed_level AS detailedLevel,
+      financial_surplus_indicator AS financialSurplusIndicator,
+      complementary_info_id AS complementaryInfoId,
+      complementary_info AS complementaryInfo,
+      source_file AS sourceFile
+    FROM pcasp_extended_2026
+    ORDER BY account
+  `);
 
-  return db
-    .prepare(
-      `
-        SELECT
-          account,
-          title,
-          balance_nature AS balanceNature,
-          normalized_nature AS normalizedNature,
-          status,
-          detailed_level AS detailedLevel,
-          financial_surplus_indicator AS financialSurplusIndicator,
-          complementary_info_id AS complementaryInfoId,
-          complementary_info AS complementaryInfo,
-          source_file AS sourceFile
-        FROM pcasp_extended_2026
-        ORDER BY account
-      `,
-    )
-    .all() as PcaspAccount[];
+  return result.rows as unknown as PcaspAccount[];
 }
 
-function seedOfficialFiscalPackage(db: DatabaseSync) {
-  const documentUpsert = db.prepare(`
-    INSERT INTO official_fiscal_documents (
+export async function listOfficialFiscalDocuments() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT
       id,
       title,
       report,
       kind,
       exercise,
-      file_name,
-      official_path,
-      package_label
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      title = excluded.title,
-      report = excluded.report,
-      kind = excluded.kind,
-      exercise = excluded.exercise,
-      file_name = excluded.file_name,
-      official_path = excluded.official_path,
-      package_label = excluded.package_label,
-      updated_at = CURRENT_TIMESTAMP
+      file_name AS fileName,
+      official_path AS officialPath
+    FROM official_fiscal_documents
+    ORDER BY report, kind, title
   `);
 
-  const ruleUpsert = db.prepare(`
-    INSERT INTO official_fiscal_rules (
+  return result.rows as unknown as OfficialFiscalDocument[];
+}
+
+export async function listOfficialFiscalRules() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT
       code,
       report,
       category,
       severity,
       description,
-      source_document_ids,
-      package_label
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(code) DO UPDATE SET
-      report = excluded.report,
-      category = excluded.category,
-      severity = excluded.severity,
-      description = excluded.description,
-      source_document_ids = excluded.source_document_ids,
-      package_label = excluded.package_label,
-      updated_at = CURRENT_TIMESTAMP
+      source_document_ids AS sourceDocumentIds,
+      package_label AS packageLabel
+    FROM official_fiscal_rules
+    ORDER BY report, category, code
   `);
-
-  for (const document of OFFICIAL_FISCAL_DOCUMENTS) {
-    documentUpsert.run(
-      document.id,
-      document.title,
-      document.report,
-      document.kind,
-      document.exercise,
-      document.fileName,
-      document.officialPath,
-      OFFICIAL_FISCAL_PACKAGE_LABEL,
-    );
-  }
-
-  for (const rule of OFFICIAL_FISCAL_RULES) {
-    ruleUpsert.run(
-      rule.code,
-      rule.report,
-      rule.category,
-      rule.severity,
-      rule.description,
-      JSON.stringify(rule.sourceDocumentIds),
-      OFFICIAL_FISCAL_PACKAGE_LABEL,
-    );
-  }
-}
-
-export function listOfficialFiscalDocuments() {
-  const db = getDatabase();
-
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          id,
-          title,
-          report,
-          kind,
-          exercise,
-          file_name AS fileName,
-          official_path AS officialPath
-        FROM official_fiscal_documents
-        ORDER BY report, kind, title
-      `,
-    )
-    .all() as OfficialFiscalDocument[];
-
-  return rows;
-}
-
-export function listOfficialFiscalRules() {
-  const db = getDatabase();
-
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          code,
-          report,
-          category,
-          severity,
-          description,
-          source_document_ids AS sourceDocumentIds,
-          package_label AS packageLabel
-        FROM official_fiscal_rules
-        ORDER BY report, category, code
-      `,
-    )
-    .all() as Array<Omit<StoredOfficialFiscalRule, "sourceDocumentIds"> & { sourceDocumentIds: string }>;
+  const rows = result.rows as unknown as Array<
+    Omit<StoredOfficialFiscalRule, "sourceDocumentIds"> & { sourceDocumentIds: string }
+  >;
 
   return rows.map((row) => ({
     ...row,

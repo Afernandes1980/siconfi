@@ -3,8 +3,8 @@ import { listAccountNatures } from "@/lib/rules-db";
 
 export const runtime = "nodejs";
 
-export function GET() {
+export async function GET() {
   return NextResponse.json({
-    natures: listAccountNatures(),
+    natures: await listAccountNatures(),
   });
 }
