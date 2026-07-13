@@ -165,3 +165,7 @@ scripts/
 - `GET /api/pcasp-accounts`: contas do PCASP Estendido 2026.
 
 As APIs usam o runtime Node.js porque acessam o SQLite local.
+
+
+
+llllllllllllll
