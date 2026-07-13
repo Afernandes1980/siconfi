@@ -8,15 +8,20 @@ import {
 
 export const runtime = "nodejs";
 
-export function GET() {
-  const rules = listComparisonRules();
+export async function GET() {
+  const [rules, summary, documents, officialRules] = await Promise.all([
+    listComparisonRules(),
+    getComparisonRulesSummary(),
+    listOfficialFiscalDocuments(),
+    listOfficialFiscalRules(),
+  ]);
 
   return NextResponse.json({
     rules,
-    summary: getComparisonRulesSummary(),
+    summary,
     officialFiscal: {
-      documents: listOfficialFiscalDocuments(),
-      rules: listOfficialFiscalRules(),
+      documents,
+      rules: officialRules,
     },
   });
 }

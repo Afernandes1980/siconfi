@@ -5,12 +5,15 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "db:migrate": "node scripts/migrate-db.mjs",
+    "db:migrate:local": "node scripts/migrate-local-sqlite.mjs",
     "import:rules": "node scripts/import-comparison-rules.mjs",
     "import:msc-layout": "node scripts/import-msc-layout.mjs",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
+    "@tursodatabase/serverless": "^1.2.3",
     "fflate": "^0.8.3",
     "next": "16.2.4",
     "react": "^19.0.0",

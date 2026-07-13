@@ -1,20 +1,17 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { DatabaseSync } from "node:sqlite";
 import { strFromU8, unzipSync } from "fflate";
+import { database, executeInBatches } from "./turso-client.mjs";
 
 const inputFile = process.argv[2] || findDefaultFile();
-const dbPath = path.join(process.cwd(), "data", "siconfi.sqlite");
 
 if (!inputFile || !existsSync(inputFile)) {
   console.error(`Arquivo nao encontrado: ${inputFile || "(nao informado)"}`);
   process.exit(1);
 }
 
-const db = new DatabaseSync(dbPath);
-
-db.exec(`
+await database.exec(`
   CREATE TABLE IF NOT EXISTS comparison_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     dimension TEXT NOT NULL,
@@ -34,18 +31,19 @@ db.exec(`
 `);
 
 const workbook = readWorkbook(inputFile);
-const upsert = db.prepare(`
+const upsertSql = `
   INSERT INTO comparison_rules (dimension, code, item, status, source_file)
-  VALUES (?, ?, ?, ?, ?)
+  VALUES (:dimension, :code, :item, :status, :sourceFile)
   ON CONFLICT(code) DO UPDATE SET
     dimension = excluded.dimension,
     item = excluded.item,
     status = excluded.status,
     source_file = excluded.source_file,
     updated_at = CURRENT_TIMESTAMP
-`);
+`;
 
 let imported = 0;
+const statements = [];
 
 for (const sheet of workbook.sheets) {
   for (const row of sheet.rows.slice(1)) {
@@ -56,14 +54,24 @@ for (const sheet of workbook.sheets) {
 
     if (!dimension || !code || !item) continue;
 
-    upsert.run(dimension, code, item, status, path.basename(inputFile));
+    statements.push({
+      sql: upsertSql,
+      args: {
+        dimension,
+        code,
+        item,
+        status,
+        sourceFile: path.basename(inputFile),
+      },
+    });
     imported += 1;
   }
 }
 
-db.close();
+await executeInBatches(statements);
+await database.close();
 console.log(`Regras importadas/atualizadas: ${imported}`);
-console.log(`Banco: ${dbPath}`);
+console.log("Banco: Turso");
 
 function findDefaultFile() {
   const downloads = path.join(process.env.USERPROFILE || "", "Downloads");
