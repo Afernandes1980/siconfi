@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+html,
+body {
+  background: #eef3f8;
+  color: #172033;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-background {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(238, 243, 248, 0.72) 44%, rgba(214, 226, 237, 0.95)),
+    linear-gradient(135deg, #f7fafc 0%, #e7eef5 50%, #d8e5ee 100%);
+}
+
+.form-field {
+  @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-cyan-600 focus:ring-2 focus:ring-cyan-100 disabled:bg-slate-100 disabled:text-slate-500;
+}
+
+.form-button-primary {
+  @apply inline-flex items-center justify-center rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-55;
+}
+
+.form-button-secondary {
+  @apply inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-cyan-600 hover:text-cyan-800 disabled:cursor-not-allowed disabled:opacity-55;
+}
+
+.panel {
+  @apply rounded-lg border border-slate-200 bg-white shadow-sm;
+}
