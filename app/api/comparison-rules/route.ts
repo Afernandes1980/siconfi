@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import {
   getComparisonRulesSummary,
   listComparisonRules,
@@ -9,6 +10,10 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
+  if (!(await getCurrentUser())) {
+    return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
+  }
+
   const [rules, summary, documents, officialRules] = await Promise.all([
     listComparisonRules(),
     getComparisonRulesSummary(),

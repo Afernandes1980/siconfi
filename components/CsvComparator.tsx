@@ -103,7 +103,11 @@ type AccountNatureValidation = {
 
 type AccountNatureFilter = "todas" | "corretas" | "invertidas";
 
-export default function CsvComparator() {
+export default function CsvComparator({
+  currentUser,
+}: {
+  currentUser: { displayName: string; email: string };
+}) {
   const [sourceCsv, setSourceCsv] = useState<ParsedCsv>(EMPTY_CSV);
   const [targetCsv, setTargetCsv] = useState<ParsedCsv>(EMPTY_CSV);
   const [sourceName, setSourceName] = useState("");
@@ -239,6 +243,11 @@ export default function CsvComparator() {
     setMappings((current) => current.filter((mapping) => imported.parsed.headers.includes(mapping.targetColumn)));
   }
 
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.assign("/login");
+  }
+
   async function handleFileSafely(file: File, side: "source" | "target") {
     try {
       await handleFile(file, side);
@@ -302,14 +311,23 @@ export default function CsvComparator() {
             </p>
           </div>
 
-          <button
-            type="button"
-            className="form-button-primary"
-            disabled={results.length === 0}
-            onClick={exportResults}
-          >
-            Exportar resultado
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="text-right">
+              <p className="text-sm font-semibold text-slate-800">{currentUser.displayName}</p>
+              <p className="text-xs text-slate-500">{currentUser.email}</p>
+            </div>
+            <button type="button" className="form-button-secondary" onClick={handleLogout}>
+              Sair
+            </button>
+            <button
+              type="button"
+              className="form-button-primary"
+              disabled={results.length === 0}
+              onClick={exportResults}
+            >
+              Exportar resultado
+            </button>
+          </div>
         </header>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
