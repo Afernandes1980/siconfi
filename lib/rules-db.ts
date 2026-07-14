@@ -42,6 +42,12 @@ export type StoredOfficialFiscalRule = OfficialFiscalRule & {
 
 let initialization: Promise<void> | null = null;
 
+function resultRows<T>(result: { columns: string[]; rows: unknown[][] }): T[] {
+  return result.rows.map((row) =>
+    Object.fromEntries(result.columns.map((column, index) => [column, row[index]])),
+  ) as T[];
+}
+
 export function initializeDatabase() {
   if (!initialization) {
     initialization = initialize().catch((error) => {
@@ -164,7 +170,7 @@ export async function listComparisonRules() {
     ORDER BY dimension, code
   `);
 
-  return result.rows as unknown as StoredComparisonRule[];
+  return resultRows<StoredComparisonRule>(result);
 }
 
 export async function upsertComparisonRule(
@@ -195,7 +201,7 @@ export async function getComparisonRulesSummary() {
     ORDER BY dimension, status
   `);
 
-  return result.rows as unknown as Array<{ dimension: string; status: string; total: number }>;
+  return resultRows<{ dimension: string; status: string; total: number }>(result);
 }
 
 export async function listAccountNatures() {
@@ -206,7 +212,7 @@ export async function listAccountNatures() {
     ORDER BY account_class
   `);
 
-  return result.rows as unknown as AccountNature[];
+  return resultRows<AccountNature>(result);
 }
 
 export async function listPcaspAccounts() {
@@ -227,7 +233,7 @@ export async function listPcaspAccounts() {
     ORDER BY account
   `);
 
-  return result.rows as unknown as PcaspAccount[];
+  return resultRows<PcaspAccount>(result);
 }
 
 export async function listOfficialFiscalDocuments() {
@@ -245,7 +251,7 @@ export async function listOfficialFiscalDocuments() {
     ORDER BY report, kind, title
   `);
 
-  return result.rows as unknown as OfficialFiscalDocument[];
+  return resultRows<OfficialFiscalDocument>(result);
 }
 
 export async function listOfficialFiscalRules() {
@@ -262,9 +268,9 @@ export async function listOfficialFiscalRules() {
     FROM official_fiscal_rules
     ORDER BY report, category, code
   `);
-  const rows = result.rows as unknown as Array<
+  const rows = resultRows<
     Omit<StoredOfficialFiscalRule, "sourceDocumentIds"> & { sourceDocumentIds: string }
-  >;
+  >(result);
 
   return rows.map((row) => ({
     ...row,
