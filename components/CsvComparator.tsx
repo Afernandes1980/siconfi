@@ -670,18 +670,23 @@ export default function CsvComparator({
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
                     <td className="break-words px-4 py-3 font-medium text-slate-950">{rule.code}</td>
                     <td className="px-4 py-3">
-                      <select
-                        className="form-field min-w-0 max-w-full"
-                        aria-label={`Periodicidade da regra ${rule.code}`}
-                        value={selectedPeriodicity}
-                        disabled={isAutomaticAccountNatureRule}
-                        onChange={(event) => openRuleChecks(rule, event.target.value as PeriodicityKey)}
-                      >
-                        <option value="monthly">Mensal</option>
-                        <option value="bimonthly">Bimestral</option>
-                        <option value="four_monthly">Quadrimestral</option>
-                        <option value="annual">Anual</option>
-                      </select>
+                      {isAutomaticAccountNatureRule ? (
+                        <span className="mx-auto flex w-fit rounded-md bg-cyan-50 px-2.5 py-1.5 text-[0.9rem] font-semibold text-cyan-700">
+                          Automática
+                        </span>
+                      ) : (
+                        <select
+                          className="form-field min-w-0 max-w-full"
+                          aria-label={`Periodicidade da regra ${rule.code}`}
+                          value={selectedPeriodicity}
+                          onChange={(event) => openRuleChecks(rule, event.target.value as PeriodicityKey)}
+                        >
+                          <option value="monthly">Mensal</option>
+                          <option value="bimonthly">Bimestral</option>
+                          <option value="four_monthly">Quadrimestral</option>
+                          <option value="annual">Anual</option>
+                        </select>
+                      )}
                     </td>
                     <td className="whitespace-normal break-words px-4 py-3 leading-relaxed text-slate-600">{rule.item}</td>
                     <td className="overflow-hidden px-4 py-3">
