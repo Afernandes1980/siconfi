@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getComparisonRulesSummary,
+  listComparisonRuleChecks,
+  listComparisonRulePeriodicities,
   listComparisonRules,
   listOfficialFiscalDocuments,
   listOfficialFiscalRules,
@@ -14,9 +16,11 @@ export async function GET() {
     return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
   }
 
-  const [rules, summary, documents, officialRules] = await Promise.all([
+  const [rules, summary, checks, periodicities, documents, officialRules] = await Promise.all([
     listComparisonRules(),
     getComparisonRulesSummary(),
+    listComparisonRuleChecks(),
+    listComparisonRulePeriodicities(),
     listOfficialFiscalDocuments(),
     listOfficialFiscalRules(),
   ]);
@@ -24,6 +28,8 @@ export async function GET() {
   return NextResponse.json({
     rules,
     summary,
+    checks,
+    periodicities,
     officialFiscal: {
       documents,
       rules: officialRules,

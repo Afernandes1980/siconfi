@@ -33,6 +33,22 @@ export const DATABASE_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_comparison_rules_status
     ON comparison_rules (status);
 
+  CREATE TABLE IF NOT EXISTS comparison_rule_checks (
+    rule_code TEXT NOT NULL,
+    period_index INTEGER NOT NULL CHECK (period_index BETWEEN 1 AND 12),
+    completed_date TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (rule_code, period_index),
+    FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS comparison_rule_periodicities (
+    rule_code TEXT PRIMARY KEY,
+    periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual')),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS account_natures (
     account_class TEXT PRIMARY KEY,
     nature TEXT NOT NULL CHECK (nature IN ('D', 'C')),

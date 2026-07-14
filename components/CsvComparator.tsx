@@ -47,6 +47,16 @@ type RulesSummary = {
   total: number;
 };
 
+type ComparisonRuleCheck = {
+  ruleCode: string;
+  periodIndex: number;
+  completedDate: string;
+};
+
+type PeriodicityKey = "monthly" | "bimonthly" | "four_monthly" | "annual";
+type RulePeriodicity = { key: PeriodicityKey; label: string; periods: number; periodLabel: string };
+type ComparisonRulePeriodicity = { ruleCode: string; periodicity: PeriodicityKey };
+
 type OfficialFiscalDocument = {
   id: string;
   title: string;
@@ -117,6 +127,13 @@ export default function CsvComparator({
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [storedRules, setStoredRules] = useState<StoredComparisonRule[]>([]);
   const [rulesSummary, setRulesSummary] = useState<RulesSummary[]>([]);
+  const [ruleChecks, setRuleChecks] = useState<ComparisonRuleCheck[]>([]);
+  const [rulePeriodicities, setRulePeriodicities] = useState<ComparisonRulePeriodicity[]>([]);
+  const [editingRule, setEditingRule] = useState<StoredComparisonRule | null>(null);
+  const [editingPeriodicity, setEditingPeriodicity] = useState<PeriodicityKey>("annual");
+  const [editingDates, setEditingDates] = useState<string[]>([]);
+  const [savingChecks, setSavingChecks] = useState(false);
+  const [checksError, setChecksError] = useState("");
   const [rulesLoading, setRulesLoading] = useState(true);
   const [fileError, setFileError] = useState("");
   const [rulesSearch, setRulesSearch] = useState("");
@@ -149,6 +166,19 @@ export default function CsvComparator({
       return matchesDimension && (!search || searchable.includes(search));
     });
   }, [rulesSearch, selectedDimension, storedRules]);
+  const checksByRule = useMemo(() => {
+    const checks = new Map<string, Map<number, string>>();
+    ruleChecks.forEach((check) => {
+      const periods = checks.get(check.ruleCode) ?? new Map<number, string>();
+      periods.set(Number(check.periodIndex), check.completedDate);
+      checks.set(check.ruleCode, periods);
+    });
+    return checks;
+  }, [ruleChecks]);
+  const periodicityByRule = useMemo(
+    () => new Map(rulePeriodicities.map((item) => [item.ruleCode, item.periodicity])),
+    [rulePeriodicities],
+  );
   const accountNatureValidation = useMemo(
     () => validateAccountNatures(sourceCsv, pcaspAccounts),
     [pcaspAccounts, sourceCsv],
@@ -179,6 +209,8 @@ export default function CsvComparator({
       .then((data: {
         rules: StoredComparisonRule[];
         summary: RulesSummary[];
+        checks: ComparisonRuleCheck[];
+        periodicities: ComparisonRulePeriodicity[];
         officialFiscal?: {
           documents: OfficialFiscalDocument[];
           rules: OfficialFiscalRule[];
@@ -187,6 +219,8 @@ export default function CsvComparator({
         if (!active) return;
         setStoredRules(data.rules ?? []);
         setRulesSummary(data.summary ?? []);
+        setRuleChecks(data.checks ?? []);
+        setRulePeriodicities(data.periodicities ?? []);
         setOfficialFiscalDocuments(data.officialFiscal?.documents ?? []);
         setOfficialFiscalRules(data.officialFiscal?.rules ?? []);
       })
@@ -194,6 +228,8 @@ export default function CsvComparator({
         if (!active) return;
         setStoredRules([]);
         setRulesSummary([]);
+        setRuleChecks([]);
+        setRulePeriodicities([]);
         setOfficialFiscalDocuments([]);
         setOfficialFiscalRules([]);
       })
@@ -248,6 +284,44 @@ export default function CsvComparator({
     window.location.assign("/login");
   }
 
+  function openRuleChecks(rule: StoredComparisonRule, selected?: PeriodicityKey) {
+    const periodicity = getRulePeriodicity(selected ?? periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item));
+    const savedDates = checksByRule.get(rule.code);
+    setEditingRule(rule);
+    setEditingPeriodicity(periodicity.key);
+    setEditingDates(Array.from({ length: periodicity.periods }, (_, index) => savedDates?.get(index + 1) ?? ""));
+    setChecksError("");
+  }
+
+  async function saveRuleChecks() {
+    if (!editingRule) return;
+    setSavingChecks(true);
+    setChecksError("");
+    try {
+      const response = await fetch("/api/comparison-rules/checks", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ruleCode: editingRule.code, periodicity: editingPeriodicity, dates: editingDates }),
+      });
+      if (!response.ok) throw new Error("Nao foi possivel salvar as datas.");
+      setRuleChecks((current) => [
+        ...current.filter((check) => check.ruleCode !== editingRule.code),
+        ...editingDates.flatMap((completedDate, index) => completedDate
+          ? [{ ruleCode: editingRule.code, periodIndex: index + 1, completedDate }]
+          : []),
+      ]);
+      setRulePeriodicities((current) => [
+        ...current.filter((item) => item.ruleCode !== editingRule.code),
+        { ruleCode: editingRule.code, periodicity: editingPeriodicity },
+      ]);
+      setEditingRule(null);
+    } catch (error) {
+      setChecksError(error instanceof Error ? error.message : "Nao foi possivel salvar as datas.");
+    } finally {
+      setSavingChecks(false);
+    }
+  }
+
   async function handleFileSafely(file: File, side: "source" | "target") {
     try {
       await handleFile(file, side);
@@ -298,7 +372,7 @@ export default function CsvComparator({
 
   return (
     <main className="app-background">
-      <section className="mx-auto max-w-7xl px-5 py-6">
+      <section className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
           <div>
             <p className="text-xs font-semibold uppercase text-cyan-700">Siconfi</p>
@@ -556,32 +630,94 @@ export default function CsvComparator({
             />
           </div>
 
-          <div className="mt-4 max-h-80 overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200">
-            <table className="w-full table-fixed text-left text-sm">
+          <div className="mt-4 max-h-96 overflow-auto rounded-lg border border-slate-200">
+            <table className="w-full min-w-[1050px] table-fixed text-left text-sm">
+              <colgroup>
+                <col className="w-[8%]" />
+                <col className="w-[10%]" />
+                <col className="w-[14%]" />
+                <col className="w-[35%]" />
+                <col className="w-[25%]" />
+                <col className="w-[5%]" />
+                <col className="w-[3%]" />
+              </colgroup>
               <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="w-28 px-4 py-3">Dimensao</th>
-                  <th className="w-28 px-4 py-3">Codigo</th>
+                  <th className="px-4 py-3">Dimensao</th>
+                  <th className="px-4 py-3">Codigo</th>
+                  <th className="px-4 py-3">Periodicidade</th>
                   <th className="px-4 py-3">Regra</th>
-                  <th className="w-32 px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Periodos</th>
+                  <th className="px-2 py-3">Status</th>
+                  <th className="px-2 py-3"><span className="sr-only">Acoes</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleRules.map((rule) => (
-                  <tr key={rule.id}>
+                {visibleRules.map((rule) => {
+                  const selectedPeriodicity = periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item);
+                  const periodicity = getRulePeriodicity(selectedPeriodicity);
+                  const savedPeriods = checksByRule.get(rule.code);
+                  return (
+                  <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
                     <td className="break-words px-4 py-3 font-medium text-slate-950">{rule.code}</td>
-                    <td className="whitespace-normal break-words px-4 py-3 leading-relaxed text-slate-600">{rule.item}</td>
                     <td className="px-4 py-3">
+                      <select
+                        className="form-field min-w-0 max-w-full"
+                        aria-label={`Periodicidade da regra ${rule.code}`}
+                        value={selectedPeriodicity}
+                        onChange={(event) => openRuleChecks(rule, event.target.value as PeriodicityKey)}
+                      >
+                        <option value="monthly">Mensal</option>
+                        <option value="bimonthly">Bimestral</option>
+                        <option value="four_monthly">Quadrimestral</option>
+                        <option value="annual">Anual</option>
+                      </select>
+                    </td>
+                    <td className="whitespace-normal break-words px-4 py-3 leading-relaxed text-slate-600">{rule.item}</td>
+                    <td className="overflow-hidden px-4 py-3">
+                      {periodicity.periods > 0 ? (
+                        <div className="flex w-full gap-1" aria-label={`${periodicity.periods} periodos`}>
+                          {Array.from({ length: periodicity.periods }, (_, index) => {
+                            const date = savedPeriods?.get(index + 1);
+                            return (
+                              <span
+                                key={index}
+                                title={date ? `${index + 1}º ${periodicity.periodLabel}: ${formatDate(date)}` : `${index + 1}º ${periodicity.periodLabel}: pendente`}
+                                className={`flex h-7 min-w-0 flex-1 items-center justify-center rounded-md border text-sm font-bold ${
+                                  date
+                                    ? "border-emerald-300 bg-emerald-100 text-emerald-700"
+                                    : "border-rose-300 bg-rose-50 text-rose-600"
+                                }`}
+                              >
+                                {date ? "✓" : "×"}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      ) : <span className="text-xs text-slate-400">Sem períodos</span>}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-3">
                       <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
                         {rule.status}
                       </span>
                     </td>
+                    <td className="px-2 py-3 text-center">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-lg font-bold leading-none text-slate-600 hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        title={periodicity.periods ? "Informar datas" : "Periodicidade não identificada"}
+                        onClick={() => openRuleChecks(rule)}
+                      >
+                        …
+                      </button>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {!rulesLoading && visibleRules.length === 0 && (
                   <tr>
-                    <td className="px-4 py-8 text-center text-slate-500" colSpan={4}>
+                    <td className="px-4 py-8 text-center text-slate-500" colSpan={7}>
                       Nenhuma regra encontrada.
                     </td>
                   </tr>
@@ -590,6 +726,19 @@ export default function CsvComparator({
             </table>
           </div>
         </section>
+
+        {editingRule && (
+          <RuleChecksDialog
+            rule={editingRule}
+            periodicityKey={editingPeriodicity}
+            dates={editingDates}
+            error={checksError}
+            saving={savingChecks}
+            onChange={setEditingDates}
+            onClose={() => setEditingRule(null)}
+            onSave={saveRuleChecks}
+          />
+        )}
 
         <section className="panel mt-5 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -748,6 +897,100 @@ function normalizeSearch(value: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function inferRulePeriodicity(item: string): PeriodicityKey {
+  const text = normalizeSearch(item);
+  if (text.includes("dca") || text.includes("anual")) {
+    return "annual";
+  }
+  if (text.includes("rgf") || text.includes("quadrimestr")) {
+    return "four_monthly";
+  }
+  if (text.includes("rreo") || text.includes("bimestr")) {
+    return "bimonthly";
+  }
+  return "annual";
+}
+
+function getRulePeriodicity(key: PeriodicityKey): RulePeriodicity {
+  const periodicities: Record<PeriodicityKey, RulePeriodicity> = {
+    monthly: { key: "monthly", label: "Mensal", periods: 12, periodLabel: "Mês" },
+    bimonthly: { key: "bimonthly", label: "Bimestral", periods: 6, periodLabel: "Bimestre" },
+    four_monthly: { key: "four_monthly", label: "Quadrimestral", periods: 3, periodLabel: "Quadrimestre" },
+    annual: { key: "annual", label: "Anual", periods: 1, periodLabel: "Ano" },
+  };
+  return periodicities[key];
+}
+
+function formatDate(value: string) {
+  const [year, month, day] = value.split("-");
+  return year && month && day ? `${day}/${month}/${year}` : value;
+}
+
+function RuleChecksDialog({
+  rule,
+  periodicityKey,
+  dates,
+  error,
+  saving,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  rule: StoredComparisonRule;
+  periodicityKey: PeriodicityKey;
+  dates: string[];
+  error: string;
+  saving: boolean;
+  onChange: (dates: string[]) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const periodicity = getRulePeriodicity(periodicityKey);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation" onMouseDown={onClose}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rule-checks-title"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="rule-checks-title" className="text-lg font-semibold text-slate-950">Datas de verificação</h2>
+            <p className="mt-1 text-sm text-slate-500">{rule.code} · {periodicity.label}</p>
+          </div>
+          <button type="button" className="rounded-md px-2 py-1 text-xl text-slate-500 hover:bg-slate-100" onClick={onClose} aria-label="Fechar">×</button>
+        </div>
+        <p className="mt-4 text-sm leading-relaxed text-slate-700">{rule.item}</p>
+        <div className="mt-5 space-y-3">
+          {dates.map((date, index) => (
+            <label key={index} className="grid items-center gap-2 sm:grid-cols-[1fr_190px]">
+              <span className="text-sm font-semibold text-slate-700">{index + 1}º {periodicity.periodLabel}</span>
+              <span className="flex items-center gap-2">
+                <input
+                  type="date"
+                  className="form-field"
+                  value={date}
+                  onChange={(event) => onChange(dates.map((current, currentIndex) => currentIndex === index ? event.target.value : current))}
+                />
+                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-bold ${date ? "border-emerald-300 bg-emerald-100 text-emerald-700" : "border-rose-300 bg-rose-50 text-rose-600"}`}>
+                  {date ? "✓" : "×"}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">{error}</p>}
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" className="form-button-secondary" onClick={onClose}>Cancelar</button>
+          <button type="button" className="form-button-primary" disabled={saving} onClick={onSave}>{saving ? "Salvando..." : "Salvar datas"}</button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function FiscalRulesPanel({
