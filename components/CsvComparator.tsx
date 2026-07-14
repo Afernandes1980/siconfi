@@ -657,6 +657,14 @@ export default function CsvComparator({
                   const selectedPeriodicity = periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item);
                   const periodicity = getRulePeriodicity(selectedPeriodicity);
                   const savedPeriods = checksByRule.get(rule.code);
+                  const isAutomaticAccountNatureRule = rule.code === "D1_00021";
+                  const automaticCheckExecuted = isAutomaticAccountNatureRule
+                    && sourceCsv.rows.length > 0
+                    && pcaspAccounts.length > 0;
+                  const automaticCheckPassed = automaticCheckExecuted
+                    && accountNatureValidation.checked > 0
+                    && accountNatureValidation.inverted === 0
+                    && accountNatureValidation.withoutNature === 0;
                   return (
                   <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
@@ -666,6 +674,7 @@ export default function CsvComparator({
                         className="form-field min-w-0 max-w-full"
                         aria-label={`Periodicidade da regra ${rule.code}`}
                         value={selectedPeriodicity}
+                        disabled={isAutomaticAccountNatureRule}
                         onChange={(event) => openRuleChecks(rule, event.target.value as PeriodicityKey)}
                       >
                         <option value="monthly">Mensal</option>
@@ -680,17 +689,27 @@ export default function CsvComparator({
                         <div className="flex w-full gap-1" aria-label={`${periodicity.periods} periodos`}>
                           {Array.from({ length: periodicity.periods }, (_, index) => {
                             const date = savedPeriods?.get(index + 1);
+                            const periodPassed = isAutomaticAccountNatureRule ? automaticCheckPassed : Boolean(date);
+                            const periodTitle = isAutomaticAccountNatureRule
+                              ? automaticCheckPassed
+                                ? `Verificação automática concluída: ${accountNatureValidation.checked} contas corretas`
+                                : automaticCheckExecuted
+                                  ? `Verificação automática concluída: ${accountNatureValidation.inverted} contas invertidas e ${accountNatureValidation.withoutNature} sem natureza`
+                                  : "Importe a MSC para executar a verificação automática"
+                              : date
+                                ? `${index + 1}º ${periodicity.periodLabel}: ${formatDate(date)}`
+                                : `${index + 1}º ${periodicity.periodLabel}: pendente`;
                             return (
                               <span
                                 key={index}
-                                title={date ? `${index + 1}º ${periodicity.periodLabel}: ${formatDate(date)}` : `${index + 1}º ${periodicity.periodLabel}: pendente`}
+                                title={periodTitle}
                                 className={`flex h-7 min-w-0 flex-1 items-center justify-center rounded-md border text-sm font-bold ${
-                                  date
+                                  periodPassed
                                     ? "border-emerald-300 bg-emerald-100 text-emerald-700"
                                     : "border-rose-300 bg-rose-50 text-rose-600"
                                 }`}
                               >
-                                {date ? "✓" : "×"}
+                                {periodPassed ? "✓" : "×"}
                               </span>
                             );
                           })}
@@ -698,19 +717,25 @@ export default function CsvComparator({
                       ) : <span className="text-xs text-slate-400">Sem períodos</span>}
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">
-                      <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-                        {rule.status}
+                      <span className={`rounded-md px-2 py-1 text-xs font-semibold ${
+                        automaticCheckExecuted
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-700"
+                      }`}>
+                        {automaticCheckExecuted ? "REALIZADO" : rule.status}
                       </span>
                     </td>
                     <td className="px-2 py-3 text-center">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-lg font-bold leading-none text-slate-600 hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
-                        title={periodicity.periods ? "Informar datas" : "Periodicidade não identificada"}
-                        onClick={() => openRuleChecks(rule)}
-                      >
-                        …
-                      </button>
+                      {!isAutomaticAccountNatureRule && (
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-lg font-bold leading-none text-slate-600 hover:border-cyan-600 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-40"
+                          title={periodicity.periods ? "Informar datas" : "Periodicidade não identificada"}
+                          onClick={() => openRuleChecks(rule)}
+                        >
+                          …
+                        </button>
+                      )}
                     </td>
                   </tr>
                   );
