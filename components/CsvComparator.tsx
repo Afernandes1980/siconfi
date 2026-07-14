@@ -663,8 +663,7 @@ export default function CsvComparator({
                     && pcaspAccounts.length > 0;
                   const automaticCheckPassed = automaticCheckExecuted
                     && accountNatureValidation.checked > 0
-                    && accountNatureValidation.inverted === 0
-                    && accountNatureValidation.withoutNature === 0;
+                    && accountNatureValidation.inverted === 0;
                   return (
                   <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
@@ -723,11 +722,11 @@ export default function CsvComparator({
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">
                       <span className={`rounded-md px-2 py-1 text-xs font-semibold ${
-                        automaticCheckExecuted
+                        automaticCheckPassed
                           ? "bg-emerald-100 text-emerald-700"
                           : "bg-slate-100 text-slate-700"
                       }`}>
-                        {automaticCheckExecuted ? "REALIZADO" : rule.status}
+                        {automaticCheckPassed ? "REALIZADO" : rule.status}
                       </span>
                     </td>
                     <td className="px-2 py-3 text-center">
