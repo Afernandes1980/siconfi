@@ -18,6 +18,17 @@ export type StoredComparisonRule = {
   updatedAt: string;
 };
 
+export type ComparisonRuleCheck = {
+  ruleCode: string;
+  periodIndex: number;
+  completedDate: string;
+};
+
+export type ComparisonRulePeriodicity = {
+  ruleCode: string;
+  periodicity: "monthly" | "bimonthly" | "four_monthly" | "annual";
+};
+
 export type AccountNature = {
   accountClass: string;
   nature: "D" | "C";
@@ -189,6 +200,57 @@ export async function upsertComparisonRule(
         updated_at = CURRENT_TIMESTAMP
     `,
     [rule.dimension, rule.code, rule.item, rule.status, rule.sourceFile],
+  );
+}
+
+export async function listComparisonRuleChecks() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT rule_code AS ruleCode, period_index AS periodIndex, completed_date AS completedDate
+    FROM comparison_rule_checks
+    ORDER BY rule_code, period_index
+  `);
+
+  return resultRows<ComparisonRuleCheck>(result);
+}
+
+export async function listComparisonRulePeriodicities() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT rule_code AS ruleCode, periodicity
+    FROM comparison_rule_periodicities
+    ORDER BY rule_code
+  `);
+
+  return resultRows<ComparisonRulePeriodicity>(result);
+}
+
+export async function saveComparisonRuleChecks(
+  ruleCode: string,
+  periodicity: ComparisonRulePeriodicity["periodicity"],
+  dates: string[],
+) {
+  await initializeDatabase();
+  await database.batch(
+    [{
+      sql: "INSERT INTO comparison_rule_periodicities (rule_code, periodicity) VALUES (?, ?) ON CONFLICT(rule_code) DO UPDATE SET periodicity = excluded.periodicity, updated_at = CURRENT_TIMESTAMP",
+      args: [ruleCode, periodicity],
+    }, {
+      sql: "DELETE FROM comparison_rule_checks WHERE rule_code = ? AND period_index > ?",
+      args: [ruleCode, dates.length],
+    }, ...dates.map((completedDate, index) => completedDate
+      ? {
+          sql: `INSERT INTO comparison_rule_checks (rule_code, period_index, completed_date)
+                VALUES (?, ?, ?)
+                ON CONFLICT(rule_code, period_index) DO UPDATE SET
+                  completed_date = excluded.completed_date, updated_at = CURRENT_TIMESTAMP`,
+          args: [ruleCode, index + 1, completedDate],
+        }
+      : {
+          sql: "DELETE FROM comparison_rule_checks WHERE rule_code = ? AND period_index = ?",
+          args: [ruleCode, index + 1],
+        })],
+    "immediate",
   );
 }
 
