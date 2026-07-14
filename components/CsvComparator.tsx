@@ -661,9 +661,7 @@ export default function CsvComparator({
                   const automaticCheckExecuted = isAutomaticAccountNatureRule
                     && sourceCsv.rows.length > 0
                     && pcaspAccounts.length > 0;
-                  const automaticCheckPassed = automaticCheckExecuted
-                    && accountNatureValidation.checked > 0
-                    && accountNatureValidation.inverted === 0;
+                  const automaticCheckPassed = automaticCheckExecuted;
                   return (
                   <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
@@ -695,11 +693,9 @@ export default function CsvComparator({
                             const date = savedPeriods?.get(index + 1);
                             const periodPassed = isAutomaticAccountNatureRule ? automaticCheckPassed : Boolean(date);
                             const periodTitle = isAutomaticAccountNatureRule
-                              ? automaticCheckPassed
-                                ? `Verificação automática concluída: ${accountNatureValidation.checked} contas corretas`
-                                : automaticCheckExecuted
-                                  ? `Verificação automática concluída: ${accountNatureValidation.inverted} contas invertidas e ${accountNatureValidation.withoutNature} sem natureza`
-                                  : "Importe a MSC para executar a verificação automática"
+                              ? automaticCheckExecuted
+                                ? `Verificação automática executada: ${accountNatureValidation.correct} corretas, ${accountNatureValidation.inverted} invertidas e ${accountNatureValidation.withoutNature} sem natureza`
+                                : "Importe a MSC para executar a verificação automática"
                               : date
                                 ? `${index + 1}º ${periodicity.periodLabel}: ${formatDate(date)}`
                                 : `${index + 1}º ${periodicity.periodLabel}: pendente`;
