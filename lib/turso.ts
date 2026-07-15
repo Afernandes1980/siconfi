@@ -37,6 +37,7 @@ export const DATABASE_SCHEMA = `
     rule_code TEXT NOT NULL,
     period_index INTEGER NOT NULL CHECK (period_index BETWEEN 1 AND 12),
     completed_date TEXT NOT NULL,
+    quantity INTEGER,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (rule_code, period_index),
     FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
@@ -44,7 +45,7 @@ export const DATABASE_SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS comparison_rule_periodicities (
     rule_code TEXT PRIMARY KEY,
-    periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual')),
+    periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual', 'not_applicable')),
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
   );

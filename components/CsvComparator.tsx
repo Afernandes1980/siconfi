@@ -32,6 +32,7 @@ const RESULT_HEADERS = [
 ];
 
 const RULES: ComparisonRuleKind[] = ["equals", "equalsIgnoreCase", "contains", "number", "date"];
+const QUANTITY_RULE_CODES = new Set(["D1_00011", "D1_00012", "D1_00013", "D1_00014"]);
 
 type StoredComparisonRule = {
   id: number;
@@ -51,9 +52,11 @@ type ComparisonRuleCheck = {
   ruleCode: string;
   periodIndex: number;
   completedDate: string;
+  quantity: number | null;
 };
 
-type PeriodicityKey = "monthly" | "bimonthly" | "four_monthly" | "annual";
+type PeriodicityKey = "monthly" | "bimonthly" | "four_monthly" | "annual" | "not_applicable";
+type PeriodicityFilter = PeriodicityKey | "todas";
 type RulePeriodicity = { key: PeriodicityKey; label: string; periods: number; periodLabel: string };
 type ComparisonRulePeriodicity = { ruleCode: string; periodicity: PeriodicityKey };
 
@@ -132,12 +135,13 @@ export default function CsvComparator({
   const [editingRule, setEditingRule] = useState<StoredComparisonRule | null>(null);
   const [editingPeriodicity, setEditingPeriodicity] = useState<PeriodicityKey>("annual");
   const [editingDates, setEditingDates] = useState<string[]>([]);
+  const [editingQuantities, setEditingQuantities] = useState<string[]>([]);
   const [savingChecks, setSavingChecks] = useState(false);
   const [checksError, setChecksError] = useState("");
   const [rulesLoading, setRulesLoading] = useState(true);
   const [fileError, setFileError] = useState("");
   const [rulesSearch, setRulesSearch] = useState("");
-  const [selectedDimension, setSelectedDimension] = useState("todas");
+  const [selectedPeriodicityFilter, setSelectedPeriodicityFilter] = useState<PeriodicityFilter>("todas");
   const [showAccountNature, setShowAccountNature] = useState(true);
   const [accountNatureFilter, setAccountNatureFilter] = useState<AccountNatureFilter>("todas");
   const [officialFiscalDocuments, setOfficialFiscalDocuments] = useState<OfficialFiscalDocument[]>([]);
@@ -157,28 +161,30 @@ export default function CsvComparator({
     () => [...new Set(rulesSummary.map((item) => item.dimension))],
     [rulesSummary],
   );
-  const visibleRules = useMemo(() => {
-    const search = normalizeSearch(rulesSearch);
-
-    return storedRules.filter((rule) => {
-      const matchesDimension = selectedDimension === "todas" || rule.dimension === selectedDimension;
-      const searchable = normalizeSearch(`${rule.dimension} ${rule.code} ${rule.item} ${rule.status}`);
-      return matchesDimension && (!search || searchable.includes(search));
-    });
-  }, [rulesSearch, selectedDimension, storedRules]);
-  const checksByRule = useMemo(() => {
-    const checks = new Map<string, Map<number, string>>();
-    ruleChecks.forEach((check) => {
-      const periods = checks.get(check.ruleCode) ?? new Map<number, string>();
-      periods.set(Number(check.periodIndex), check.completedDate);
-      checks.set(check.ruleCode, periods);
-    });
-    return checks;
-  }, [ruleChecks]);
   const periodicityByRule = useMemo(
     () => new Map(rulePeriodicities.map((item) => [item.ruleCode, item.periodicity])),
     [rulePeriodicities],
   );
+  const visibleRules = useMemo(() => {
+    const search = normalizeSearch(rulesSearch);
+
+    return storedRules.filter((rule) => {
+      const rulePeriodicity = periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item);
+      const matchesPeriodicity = selectedPeriodicityFilter === "todas"
+        || rulePeriodicity === selectedPeriodicityFilter;
+      const searchable = normalizeSearch(`${rule.dimension} ${rule.code} ${rule.item} ${rule.status} ${getRulePeriodicity(rulePeriodicity).label}`);
+      return matchesPeriodicity && (!search || searchable.includes(search));
+    });
+  }, [periodicityByRule, rulesSearch, selectedPeriodicityFilter, storedRules]);
+  const checksByRule = useMemo(() => {
+    const checks = new Map<string, Map<number, ComparisonRuleCheck>>();
+    ruleChecks.forEach((check) => {
+      const periods = checks.get(check.ruleCode) ?? new Map<number, ComparisonRuleCheck>();
+      periods.set(Number(check.periodIndex), check);
+      checks.set(check.ruleCode, periods);
+    });
+    return checks;
+  }, [ruleChecks]);
   const accountNatureValidation = useMemo(
     () => validateAccountNatures(sourceCsv, pcaspAccounts),
     [pcaspAccounts, sourceCsv],
@@ -289,7 +295,11 @@ export default function CsvComparator({
     const savedDates = checksByRule.get(rule.code);
     setEditingRule(rule);
     setEditingPeriodicity(periodicity.key);
-    setEditingDates(Array.from({ length: periodicity.periods }, (_, index) => savedDates?.get(index + 1) ?? ""));
+    setEditingDates(Array.from({ length: periodicity.periods }, (_, index) => savedDates?.get(index + 1)?.completedDate ?? ""));
+    setEditingQuantities(Array.from({ length: periodicity.periods }, (_, index) => {
+      const quantity = savedDates?.get(index + 1)?.quantity;
+      return quantity === null || quantity === undefined ? "" : String(quantity);
+    }));
     setChecksError("");
   }
 
@@ -301,13 +311,13 @@ export default function CsvComparator({
       const response = await fetch("/api/comparison-rules/checks", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ruleCode: editingRule.code, periodicity: editingPeriodicity, dates: editingDates }),
+        body: JSON.stringify({ ruleCode: editingRule.code, periodicity: editingPeriodicity, dates: editingDates, quantities: editingQuantities }),
       });
       if (!response.ok) throw new Error("Nao foi possivel salvar as datas.");
       setRuleChecks((current) => [
         ...current.filter((check) => check.ruleCode !== editingRule.code),
-        ...editingDates.flatMap((completedDate, index) => completedDate
-          ? [{ ruleCode: editingRule.code, periodIndex: index + 1, completedDate }]
+        ...editingDates.flatMap((completedDate, index) => completedDate || editingQuantities[index]
+          ? [{ ruleCode: editingRule.code, periodIndex: index + 1, completedDate, quantity: editingQuantities[index] === "" ? null : Number(editingQuantities[index]) }]
           : []),
       ]);
       setRulePeriodicities((current) => [
@@ -443,7 +453,7 @@ export default function CsvComparator({
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Natureza das contas contabeis</h2>
               <p className="mt-1 text-sm text-slate-500">
-                Valida todas as contas da Matriz usando a natureza oficial do PCASP Estendido 2026.
+                Valida as contas do ativo (classe 1) da Matriz usando a natureza oficial do PCASP Estendido 2026.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -612,25 +622,35 @@ export default function CsvComparator({
           <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr]">
             <select
               className="form-field"
-              value={selectedDimension}
-              onChange={(event) => setSelectedDimension(event.target.value)}
+              value={selectedPeriodicityFilter}
+              onChange={(event) => setSelectedPeriodicityFilter(event.target.value as PeriodicityFilter)}
+              aria-label="Filtrar regras por periodicidade"
             >
-              <option value="todas">Todas as dimensoes</option>
-              {ruleDimensions.map((dimension) => (
-                <option key={dimension} value={dimension}>
-                  {dimension}
-                </option>
-              ))}
+              <option value="todas">Todas as periodicidades</option>
+              <option value="monthly">Mensal</option>
+              <option value="bimonthly">Bimestral</option>
+              <option value="four_monthly">Quadrimestral</option>
+              <option value="annual">Anual</option>
+              <option value="not_applicable">Não se aplica</option>
             </select>
             <input
               className="form-field"
               value={rulesSearch}
               onChange={(event) => setRulesSearch(event.target.value)}
-              placeholder="Buscar por codigo, regra, dimensao ou status"
+              placeholder="Buscar por codigo, regra, periodicidade ou status"
             />
           </div>
 
-          <div className="mt-4 max-h-96 overflow-auto rounded-lg border border-slate-200">
+          <div className="mt-4 space-y-4">
+          {ruleDimensions.map((dimension) => {
+            const dimensionRules = visibleRules.filter((rule) => rule.dimension === dimension);
+            return (
+          <section key={dimension} className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <h3 className="font-semibold text-slate-950">Dimensão {dimension}</h3>
+              <span className="text-sm font-medium text-slate-500">{dimensionRules.length} regras</span>
+            </div>
+          <div className="max-h-96 overflow-auto">
             <table className="w-full min-w-[1050px] table-fixed text-left text-sm">
               <colgroup>
                 <col className="w-[8%]" />
@@ -653,15 +673,22 @@ export default function CsvComparator({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleRules.map((rule) => {
+                {dimensionRules.map((rule) => {
                   const selectedPeriodicity = periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item);
                   const periodicity = getRulePeriodicity(selectedPeriodicity);
                   const savedPeriods = checksByRule.get(rule.code);
+                  const ruleCompleted = Boolean(savedPeriods && [...savedPeriods.values()].some((check) => check.completedDate || check.quantity != null));
                   const isAutomaticAccountNatureRule = rule.code === "D1_00021";
                   const automaticCheckExecuted = isAutomaticAccountNatureRule
                     && sourceCsv.rows.length > 0
                     && pcaspAccounts.length > 0;
-                  const automaticCheckPassed = automaticCheckExecuted;
+                  const automaticCheckPassed = automaticCheckExecuted
+                    && accountNatureValidation.checked > 0
+                    && accountNatureValidation.inverted === 0
+                    && accountNatureValidation.withoutNature === 0;
+                  const displayedRuleCompleted = isAutomaticAccountNatureRule
+                    ? automaticCheckPassed
+                    : ruleCompleted;
                   return (
                   <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
@@ -682,6 +709,7 @@ export default function CsvComparator({
                           <option value="bimonthly">Bimestral</option>
                           <option value="four_monthly">Quadrimestral</option>
                           <option value="annual">Anual</option>
+                          <option value="not_applicable">Não se aplica</option>
                         </select>
                       )}
                     </td>
@@ -690,7 +718,10 @@ export default function CsvComparator({
                       {periodicity.periods > 0 ? (
                         <div className="flex w-full gap-1" aria-label={`${periodicity.periods} periodos`}>
                           {Array.from({ length: periodicity.periods }, (_, index) => {
-                            const date = savedPeriods?.get(index + 1);
+                            const check = savedPeriods?.get(index + 1);
+                            const date = check?.completedDate;
+                            const quantity = check?.quantity;
+                            const hasQuantity = QUANTITY_RULE_CODES.has(rule.code) && quantity !== null && quantity !== undefined;
                             const periodPassed = isAutomaticAccountNatureRule ? automaticCheckPassed : Boolean(date);
                             const periodTitle = isAutomaticAccountNatureRule
                               ? automaticCheckExecuted
@@ -704,25 +735,27 @@ export default function CsvComparator({
                                 key={index}
                                 title={periodTitle}
                                 className={`flex h-7 min-w-0 flex-1 items-center justify-center rounded-md border text-sm font-bold ${
-                                  periodPassed
+                                  hasQuantity
+                                    ? "border-orange-400 bg-orange-100 text-orange-700"
+                                    : periodPassed
                                     ? "border-emerald-300 bg-emerald-100 text-emerald-700"
                                     : "border-rose-300 bg-rose-50 text-rose-600"
                                 }`}
                               >
-                                {periodPassed ? "✓" : "×"}
+                                {hasQuantity ? quantity : periodPassed ? "✓" : "×"}
                               </span>
                             );
                           })}
                         </div>
-                      ) : <span className="text-xs text-slate-400">Sem períodos</span>}
+                      ) : null}
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">
                       <span className={`rounded-md px-2 py-1 text-xs font-semibold ${
-                        automaticCheckPassed
+                        displayedRuleCompleted
                           ? "bg-emerald-100 text-emerald-700"
                           : "bg-slate-100 text-slate-700"
                       }`}>
-                        {automaticCheckPassed ? "REALIZADO" : rule.status}
+                        {displayedRuleCompleted ? "REALIZADO" : isAutomaticAccountNatureRule ? "PENDENTE" : rule.status}
                       </span>
                     </td>
                     <td className="px-2 py-3 text-center">
@@ -740,7 +773,7 @@ export default function CsvComparator({
                   </tr>
                   );
                 })}
-                {!rulesLoading && visibleRules.length === 0 && (
+                {!rulesLoading && dimensionRules.length === 0 && (
                   <tr>
                     <td className="px-4 py-8 text-center text-slate-500" colSpan={7}>
                       Nenhuma regra encontrada.
@@ -750,6 +783,10 @@ export default function CsvComparator({
               </tbody>
             </table>
           </div>
+          </section>
+            );
+          })}
+          </div>
         </section>
 
         {editingRule && (
@@ -757,9 +794,11 @@ export default function CsvComparator({
             rule={editingRule}
             periodicityKey={editingPeriodicity}
             dates={editingDates}
+            quantities={editingQuantities}
             error={checksError}
             saving={savingChecks}
             onChange={setEditingDates}
+            onQuantityChange={setEditingQuantities}
             onClose={() => setEditingRule(null)}
             onSave={saveRuleChecks}
           />
@@ -944,6 +983,7 @@ function getRulePeriodicity(key: PeriodicityKey): RulePeriodicity {
     bimonthly: { key: "bimonthly", label: "Bimestral", periods: 6, periodLabel: "Bimestre" },
     four_monthly: { key: "four_monthly", label: "Quadrimestral", periods: 3, periodLabel: "Quadrimestre" },
     annual: { key: "annual", label: "Anual", periods: 1, periodLabel: "Ano" },
+    not_applicable: { key: "not_applicable", label: "Não se aplica", periods: 0, periodLabel: "Período" },
   };
   return periodicities[key];
 }
@@ -957,18 +997,22 @@ function RuleChecksDialog({
   rule,
   periodicityKey,
   dates,
+  quantities,
   error,
   saving,
   onChange,
+  onQuantityChange,
   onClose,
   onSave,
 }: {
   rule: StoredComparisonRule;
   periodicityKey: PeriodicityKey;
   dates: string[];
+  quantities: string[];
   error: string;
   saving: boolean;
   onChange: (dates: string[]) => void;
+  onQuantityChange: (quantities: string[]) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
@@ -992,8 +1036,21 @@ function RuleChecksDialog({
         <p className="mt-4 text-sm leading-relaxed text-slate-700">{rule.item}</p>
         <div className="mt-5 space-y-3">
           {dates.map((date, index) => (
-            <label key={index} className="grid items-center gap-2 sm:grid-cols-[1fr_190px]">
+            <label key={index} className={`grid items-center gap-2 ${QUANTITY_RULE_CODES.has(rule.code) ? "sm:grid-cols-[1fr_72px_190px]" : "sm:grid-cols-[1fr_190px]"}`}>
               <span className="text-sm font-semibold text-slate-700">{index + 1}º {periodicity.periodLabel}</span>
+              {QUANTITY_RULE_CODES.has(rule.code) && (
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  className="form-field px-2 text-center font-semibold"
+                  placeholder="QTD"
+                  aria-label={`Quantidade do ${index + 1}º ${periodicity.periodLabel}`}
+                  value={quantities[index] ?? ""}
+                  onChange={(event) => onQuantityChange(quantities.map((current, currentIndex) => currentIndex === index ? event.target.value : current))}
+                />
+              )}
               <span className="flex items-center gap-2">
                 <input
                   type="date"
@@ -1171,6 +1228,11 @@ function validateAccountNatures(csv: ParsedCsv, pcaspAccounts: PcaspAccount[]) {
   for (const [index, row] of csv.rows.entries()) {
     const account = row[accountColumn] ?? "";
     const valueType = row[valueTypeColumn] ?? "";
+
+    // D1_00021 trata exclusivamente das contas do ativo: classe/nível 1 do PCASP.
+    if (!account.replace(/\D/g, "").startsWith("1")) {
+      continue;
+    }
 
     if (normalizeSearch(valueType) !== "ending_balance") {
       ignoredType += 1;
