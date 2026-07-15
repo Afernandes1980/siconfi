@@ -12,15 +12,16 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
-  if (!(await getCurrentUser())) {
+  const user = await getCurrentUser();
+  if (!user?.organizationId) {
     return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
   }
 
   const [rules, summary, checks, periodicities, documents, officialRules] = await Promise.all([
     listComparisonRules(),
     getComparisonRulesSummary(),
-    listComparisonRuleChecks(),
-    listComparisonRulePeriodicities(),
+    listComparisonRuleChecks(user.organizationId),
+    listComparisonRulePeriodicities(user.organizationId),
     listOfficialFiscalDocuments(),
     listOfficialFiscalRules(),
   ]);

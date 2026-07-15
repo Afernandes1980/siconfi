@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { toCsv, type ParsedCsv } from "@/lib/csv";
+import { type ParsedCsv } from "@/lib/csv";
 import { parseSpreadsheet } from "@/lib/spreadsheet";
 import { parseCsvOrZip } from "@/lib/zip-csv";
 import {
@@ -11,7 +11,6 @@ import {
 } from "@/lib/fiscal-validation";
 import {
   compareCsvRows,
-  resultRowsToCsvRows,
   ruleLabel,
   statusLabel,
   summarizeResults,
@@ -20,17 +19,6 @@ import {
 } from "@/lib/comparison";
 
 const EMPTY_CSV: ParsedCsv = { headers: [], rows: [], delimiter: ";" };
-const RESULT_HEADERS = [
-  "chave",
-  "status",
-  "coluna_arquivo_a",
-  "coluna_arquivo_b",
-  "regra",
-  "valor_arquivo_a",
-  "valor_arquivo_b",
-  "detalhe",
-];
-
 const RULES: ComparisonRuleKind[] = ["equals", "equalsIgnoreCase", "contains", "number", "date"];
 const QUANTITY_RULE_CODES = new Set(["D1_00011", "D1_00012", "D1_00013", "D1_00014"]);
 
@@ -115,11 +103,13 @@ type AccountNatureValidation = {
 };
 
 type AccountNatureFilter = "todas" | "corretas" | "invertidas";
+type AppUser = { id: number; cpf: string; email: string; displayName: string; role: string; active: number; createdAt: string };
+type Organization = { id: number; code: string; name: string; document: string; organizationType: string; state: string; municipality: string; email: string; environment: "demonstration" | "production"; active: number };
 
 export default function CsvComparator({
   currentUser,
 }: {
-  currentUser: { displayName: string; email: string };
+  currentUser: { id: number; cpf: string; displayName: string; email: string; role: string; organizationId: number | null; organizationName: string | null };
 }) {
   const [sourceCsv, setSourceCsv] = useState<ParsedCsv>(EMPTY_CSV);
   const [targetCsv, setTargetCsv] = useState<ParsedCsv>(EMPTY_CSV);
@@ -147,6 +137,11 @@ export default function CsvComparator({
   const [officialFiscalDocuments, setOfficialFiscalDocuments] = useState<OfficialFiscalDocument[]>([]);
   const [officialFiscalRules, setOfficialFiscalRules] = useState<OfficialFiscalRule[]>([]);
   const [pcaspAccounts, setPcaspAccounts] = useState<PcaspAccount[]>([]);
+  const [activeRegistration, setActiveRegistration] = useState<"users" | "organizations" | null>(null);
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
 
   const canCompare = sourceCsv.rows.length > 0 && targetCsv.rows.length > 0 && sourceKey && targetKey;
 
@@ -290,6 +285,51 @@ export default function CsvComparator({
     window.location.assign("/login");
   }
 
+  async function openRegistration(section: "users" | "organizations") {
+    setActiveRegistration(section);
+    await loadRegistrations();
+  }
+
+  async function loadRegistrations() {
+    setUsersLoading(true);
+    setUsersError("");
+    try {
+      const [usersResponse, organizationsResponse] = await Promise.all([
+        fetch("/api/users", { cache: "no-store" }),
+        fetch("/api/organizations", { cache: "no-store" }),
+      ]);
+      const usersData = await usersResponse.json();
+      const organizationsData = await organizationsResponse.json();
+      if (!usersResponse.ok) throw new Error(usersData.error ?? "Não foi possível carregar os usuários.");
+      if (!organizationsResponse.ok) throw new Error(organizationsData.error ?? "Não foi possível carregar as empresas.");
+      setAppUsers(usersData.users ?? []);
+      setOrganizations(organizationsData.organizations ?? []);
+    } catch (error) {
+      setUsersError(error instanceof Error ? error.message : "Não foi possível carregar os usuários.");
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  async function saveOrganization(input: Omit<Organization, "id"> & { id?: number }) {
+    const response = await fetch("/api/organizations", { method: input.id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "Não foi possível salvar a empresa.");
+    await loadRegistrations();
+  }
+
+  async function saveAppUser(input: { id?: number; displayName: string; cpf: string; email: string; password: string; active: boolean }) {
+    setUsersError("");
+    const response = await fetch("/api/users", {
+      method: input.id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error ?? "Não foi possível salvar o usuário.");
+    await loadRegistrations();
+  }
+
   function openRuleChecks(rule: StoredComparisonRule, selected?: PeriodicityKey) {
     const periodicity = getRulePeriodicity(selected ?? periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item));
     const savedDates = checksByRule.get(rule.code);
@@ -368,18 +408,6 @@ export default function CsvComparator({
     setMappings((current) => current.filter((mapping) => mapping.id !== id));
   }
 
-  function exportResults() {
-    const csvRows = resultRowsToCsvRows(results);
-    const content = toCsv(csvRows, RESULT_HEADERS);
-    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "comparacao-csv.csv";
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
   return (
     <main className="app-background">
       <section className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
@@ -398,21 +426,41 @@ export default function CsvComparator({
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-right">
               <p className="text-sm font-semibold text-slate-800">{currentUser.displayName}</p>
-              <p className="text-xs text-slate-500">{currentUser.email}</p>
+              <p className="text-xs text-slate-500">{currentUser.organizationName}</p>
             </div>
             <button type="button" className="form-button-secondary" onClick={handleLogout}>
               Sair
             </button>
-            <button
-              type="button"
-              className="form-button-primary"
-              disabled={results.length === 0}
-              onClick={exportResults}
-            >
-              Exportar resultado
+            {currentUser.role === "admin" && (
+              <details className="group relative">
+                <summary className="form-button-secondary cursor-pointer list-none select-none">
+                  Utilitários <span className="ml-2 text-xs transition group-open:rotate-180">⌄</span>
+                </summary>
+                <div className="absolute right-0 z-40 mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
+                  <button type="button" className="block w-full rounded-md px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-950" onClick={() => openRegistration("users")}>Cadastro de usuários</button>
+                  <button type="button" className="block w-full rounded-md px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-950" onClick={() => openRegistration("organizations")}>Cadastro de empresas</button>
+                </div>
+              </details>
+            )}
+            <button type="button" className="form-button-secondary" onClick={() => window.location.assign("/empresas")}>
+              Trocar empresa
             </button>
           </div>
         </header>
+
+        {activeRegistration === "users" && (
+          <UsersDialog
+            currentUserId={currentUser.id}
+            users={appUsers}
+            loading={usersLoading}
+            error={usersError}
+            onClose={() => setActiveRegistration(null)}
+            onSave={saveAppUser}
+          />
+        )}
+        {activeRegistration === "organizations" && (
+          <OrganizationsDialog organizations={organizations} error={usersError} onClose={() => setActiveRegistration(null)} onSave={saveOrganization} />
+        )}
 
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
           <FilePanel
@@ -991,6 +1039,178 @@ function getRulePeriodicity(key: PeriodicityKey): RulePeriodicity {
 function formatDate(value: string) {
   const [year, month, day] = value.split("-");
   return year && month && day ? `${day}/${month}/${year}` : value;
+}
+
+function formatCpf(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, "$1.$2")
+    .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1-$2");
+}
+
+function UsersDialog({ currentUserId, users, loading, error, onClose, onSave }: {
+  currentUserId: number;
+  users: AppUser[];
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: (input: { id?: number; displayName: string; cpf: string; email: string; password: string; active: boolean }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<AppUser | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState("");
+
+  function resetForm(user?: AppUser) {
+    setEditing(user ?? null);
+    setDisplayName(user?.displayName ?? "");
+    setCpf(user ? formatCpf(user.cpf) : "");
+    setEmail(user?.email ?? "");
+    setPassword("");
+    setLocalError("");
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setLocalError("");
+    try {
+      await onSave({ id: editing?.id, displayName, cpf, email, password, active: editing ? Boolean(editing.active) : true });
+      resetForm();
+    } catch (saveError) {
+      setLocalError(saveError instanceof Error ? saveError.message : "Não foi possível salvar o usuário.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleUser(user: AppUser) {
+    setLocalError("");
+    try {
+      await onSave({ id: user.id, displayName: user.displayName, cpf: user.cpf, email: user.email, password: "", active: !Boolean(user.active) });
+    } catch (saveError) {
+      setLocalError(saveError instanceof Error ? saveError.message : "Não foi possível alterar o status.");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={onClose}>
+      <section role="dialog" aria-modal="true" aria-labelledby="users-title" className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div><p className="text-xs font-semibold uppercase text-cyan-700">Cadastros</p><h2 id="users-title" className="mt-1 text-xl font-semibold text-slate-950">Cadastro de usuários</h2></div>
+          <button type="button" className="rounded-md px-2 py-1 text-xl text-slate-500 hover:bg-slate-100" onClick={onClose} aria-label="Fechar">×</button>
+        </div>
+
+        <form className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-2" onSubmit={submit}>
+          <input className="form-field" placeholder="Nome" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+          <input className="form-field" placeholder="CPF" required value={cpf} onChange={(event) => setCpf(formatCpf(event.target.value))} />
+          <input className="form-field" type="email" placeholder="E-mail" required value={email} onChange={(event) => setEmail(event.target.value)} />
+          <input className="form-field md:col-span-2" type="password" minLength={editing ? undefined : 12} placeholder={editing ? "Nova senha (opcional)" : "Senha (mínimo de 12 caracteres)"} required={!editing} value={password} onChange={(event) => setPassword(event.target.value)} />
+          <div className="flex gap-2 md:col-span-2">
+            <button className="form-button-primary" disabled={saving} type="submit">{saving ? "Salvando..." : editing ? "Atualizar usuário" : "Cadastrar usuário"}</button>
+            {editing && <button className="form-button-secondary" type="button" onClick={() => resetForm()}>Cancelar edição</button>}
+          </div>
+        </form>
+
+        {(error || localError) && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">{localError || error}</p>}
+        <div className="mt-5 overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full min-w-[680px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Nome</th><th className="px-4 py-3">CPF</th><th className="px-4 py-3">E-mail</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Ações</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {users.map((user) => <tr key={user.id}>
+                <td className="px-4 py-3 font-semibold text-slate-900">{user.displayName}</td><td className="px-4 py-3 text-slate-600">{formatCpf(user.cpf)}</td><td className="px-4 py-3 text-slate-600">{user.email}</td>
+                <td className="px-4 py-3"><span className={`rounded-md px-2 py-1 text-xs font-semibold ${user.active ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>{user.active ? "ATIVO" : "BLOQUEADO"}</span></td>
+                <td className="px-4 py-3"><div className="flex justify-end gap-2"><button type="button" className="form-button-secondary" onClick={() => resetForm(user)}>Editar</button><button type="button" className="form-button-secondary" disabled={user.id === currentUserId} title={user.id === currentUserId ? "O usuário conectado não pode ser bloqueado" : undefined} onClick={() => toggleUser(user)}>{user.active ? "Bloquear" : "Ativar"}</button></div></td>
+              </tr>)}
+              {!loading && users.length === 0 && <tr><td className="px-4 py-8 text-center text-slate-500" colSpan={5}>Nenhum usuário cadastrado.</td></tr>}
+              {loading && <tr><td className="px-4 py-8 text-center text-slate-500" colSpan={5}>Carregando usuários...</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function OrganizationsDialog({ organizations, error, onClose, onSave }: {
+  organizations: Organization[];
+  error: string;
+  onClose: () => void;
+  onSave: (input: Omit<Organization, "id"> & { id?: number }) => Promise<void>;
+}) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={onClose}>
+    <section role="dialog" aria-modal="true" aria-labelledby="organizations-title" className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl bg-white p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+      <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase text-cyan-700">Cadastros</p><h2 id="organizations-title" className="mt-1 text-xl font-semibold text-slate-950">Cadastro de empresas</h2></div><button type="button" className="rounded-md px-2 py-1 text-xl text-slate-500 hover:bg-slate-100" onClick={onClose} aria-label="Fechar">×</button></div>
+      {error && <p className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">{error}</p>}
+      <OrganizationsManager organizations={organizations} onSave={onSave} />
+    </section>
+  </div>;
+}
+
+function OrganizationsManager({ organizations, onSave }: { organizations: Organization[]; onSave: (input: Omit<Organization, "id"> & { id?: number }) => Promise<void> }) {
+  const empty = { code: "", name: "", document: "", organizationType: "Prefeitura Municipal", state: "", municipality: "", email: "", environment: "production" as const, active: 1 };
+  const [form, setForm] = useState<Omit<Organization, "id"> & { id?: number }>(empty);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    try { await onSave(form); setForm(empty); } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível salvar a empresa."); } finally { setSaving(false); }
+  }
+  async function toggle(item: Organization) {
+    try { await onSave({ ...item, active: item.active ? 0 : 1 }); } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível alterar a empresa."); }
+  }
+  return <div className="mt-8 border-t border-slate-200 pt-6">
+    <h3 className="text-lg font-semibold text-slate-950">Cadastro de empresas e municípios</h3><p className="mt-1 text-sm text-slate-500">Cada empresa representa um ambiente disponível após o login.</p>
+    <form className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-3" onSubmit={submit}>
+      <MunicipalityCodeField value={form.code} onChange={(code) => setForm({ ...form, code, state: "", municipality: "" })} onSelect={(municipality) => setForm({ ...form, code: municipality.code, state: municipality.stateCode, municipality: municipality.name })} />
+      <input className="form-field md:col-span-2" placeholder="Nome da empresa / unidade gestora" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+      <input className="form-field" placeholder="CNPJ" value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} />
+      <select className="form-field" value={form.organizationType} onChange={(e) => setForm({ ...form, organizationType: e.target.value })}><option>Prefeitura Municipal</option><option>Câmara Municipal</option><option>Autarquia</option><option>Consórcio Público</option></select>
+      <select className="form-field" value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value as Organization["environment"] })}><option value="production">Produção</option><option value="demonstration">Demonstração</option></select>
+      <input className="form-field bg-slate-100" placeholder="UF (automático)" value={form.state} readOnly />
+      <input className="form-field bg-slate-100" placeholder="Município (automático)" value={form.municipality} readOnly />
+      <input className="form-field" type="email" placeholder="E-mail" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+      <div className="flex gap-2 md:col-span-3"><button className="form-button-primary" disabled={saving}>{saving ? "Salvando..." : form.id ? "Atualizar empresa" : "Cadastrar empresa"}</button>{form.id && <button type="button" className="form-button-secondary" onClick={() => setForm(empty)}>Cancelar edição</button>}</div>
+    </form>
+    {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+    <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-4 py-3">Código IBGE</th><th className="px-4 py-3">Empresa</th><th className="px-4 py-3">Município</th><th className="px-4 py-3">Ambiente</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-100">
+      {organizations.map((item) => <tr key={item.id}><td className="px-4 py-3 font-semibold">{item.code}</td><td className="px-4 py-3">{item.name}</td><td className="px-4 py-3">{[item.municipality, item.state].filter(Boolean).join("/") || "-"}</td><td className="px-4 py-3">{item.environment === "demonstration" ? "Demonstração" : "Produção"}</td><td className="px-4 py-3">{item.active ? "ATIVA" : "BLOQUEADA"}</td><td className="px-4 py-3"><div className="flex justify-end gap-2"><button className="form-button-secondary" type="button" onClick={() => setForm(item)}>Editar</button><button className="form-button-secondary" type="button" onClick={() => toggle(item)}>{item.active ? "Bloquear" : "Ativar"}</button></div></td></tr>)}
+    </tbody></table></div>
+  </div>;
+}
+
+type IbgeMunicipality = { code: string; name: string; stateCode: string; stateName: string };
+
+function MunicipalityCodeField({ value, onChange, onSelect }: { value: string; onChange: (value: string) => void; onSelect: (municipality: IbgeMunicipality) => void }) {
+  const [results, setResults] = useState<IbgeMunicipality[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [selectedCode, setSelectedCode] = useState("");
+  useEffect(() => {
+    if (value.length < 2 || value === selectedCode) { setResults([]); return; }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setLoading(true);
+      setSearched(false);
+      fetch(`/api/organizations/municipalities?q=${encodeURIComponent(value)}`, { signal: controller.signal })
+        .then((response) => response.json()).then((data) => { setResults(data.municipalities ?? []); setOpen(true); setSearched(true); })
+        .catch(() => undefined).finally(() => setLoading(false));
+    }, 250);
+    return () => { window.clearTimeout(timeout); controller.abort(); };
+  }, [selectedCode, value]);
+  return <div className="relative">
+    <input className="form-field" placeholder="Digite o código IBGE ou município" required autoComplete="off" value={value} onFocus={() => setOpen(true)} onChange={(event) => { setSelectedCode(""); onChange(event.target.value); setOpen(true); }} />
+    {open && value.length >= 2 && (loading || searched) && <div className="absolute z-50 mt-1 max-h-64 w-full min-w-96 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+      {loading && <p className="px-3 py-3 text-sm text-slate-500">Buscando municípios...</p>}
+      {!loading && searched && results.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Nenhum município encontrado.</p>}
+      {!loading && results.map((municipality) => <button key={municipality.code} type="button" className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-cyan-50" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSelectedCode(municipality.code); onSelect(municipality); setOpen(false); setResults([]); }}><span className="font-semibold text-slate-900">{municipality.code}</span><span className="ml-2 text-slate-600">{municipality.name} - {municipality.stateCode}</span></button>)}
+    </div>}
+  </div>;
 }
 
 function RuleChecksDialog({
