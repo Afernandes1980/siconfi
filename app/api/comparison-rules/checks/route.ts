@@ -5,7 +5,8 @@ import { saveComparisonRuleChecks } from "@/lib/rules-db";
 export const runtime = "nodejs";
 
 export async function PUT(request: Request) {
-  if (!(await getCurrentUser())) {
+  const user = await getCurrentUser();
+  if (!user?.organizationId) {
     return NextResponse.json({ error: "Nao autorizado." }, { status: 401 });
   }
 
@@ -25,6 +26,6 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Dados de periodicidade invalidos." }, { status: 400 });
   }
 
-  await saveComparisonRuleChecks(ruleCode, periodicity as keyof typeof periodCounts, dates, quantities);
+  await saveComparisonRuleChecks(user.organizationId, ruleCode, periodicity as keyof typeof periodCounts, dates, quantities);
   return NextResponse.json({ ok: true });
 }

@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 export default function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [cpf, setCpf] = useState("");
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,7 +19,7 @@ export default function LoginForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: form.get("email"),
+          cpf: form.get("cpf"),
           password: form.get("password"),
         }),
       });
@@ -29,7 +30,7 @@ export default function LoginForm() {
         return;
       }
 
-      window.location.assign("/");
+      window.location.assign("/empresas");
     } catch {
       setError("Nao foi possivel conectar ao servidor.");
     } finally {
@@ -40,18 +41,22 @@ export default function LoginForm() {
   return (
     <form className="mt-7 space-y-5" onSubmit={handleSubmit}>
       <div>
-        <label className="mb-2 block text-sm font-semibold text-slate-700" htmlFor="email">
-          E-mail
+        <label className="mb-2 block text-sm font-semibold text-slate-700" htmlFor="cpf">
+          CPF
         </label>
         <input
           autoComplete="username"
           autoFocus
           className="form-field"
-          id="email"
-          name="email"
-          placeholder="usuario@exemplo.com"
+          id="cpf"
+          inputMode="numeric"
+          maxLength={14}
+          name="cpf"
+          placeholder="000.000.000-00"
           required
-          type="email"
+          type="text"
+          value={cpf}
+          onChange={(event) => setCpf(formatCpf(event.target.value))}
         />
       </div>
 
@@ -80,4 +85,12 @@ export default function LoginForm() {
       </button>
     </form>
   );
+}
+
+function formatCpf(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, "$1.$2")
+    .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1-$2");
 }
