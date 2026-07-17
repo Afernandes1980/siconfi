@@ -12,20 +12,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Requisicao invalida." }, { status: 400 });
   }
 
-  const { email, password } = (body ?? {}) as { email?: unknown; password?: unknown };
+  const { cpf, password } = (body ?? {}) as { cpf?: unknown; password?: unknown };
 
-  if (typeof email !== "string" || typeof password !== "string") {
-    return NextResponse.json({ error: "Informe e-mail e senha." }, { status: 400 });
+  if (typeof cpf !== "string" || typeof password !== "string") {
+    return NextResponse.json({ error: "Informe CPF e senha." }, { status: 400 });
   }
 
-  if (email.length > 254 || password.length > 256) {
+  if (cpf.replace(/\D/g, "").length !== 11 || password.length > 256) {
     return NextResponse.json({ error: "Credenciais invalidas." }, { status: 401 });
   }
 
-  const user = await authenticateUser(email, password);
+  const user = await authenticateUser(cpf, password);
 
   if (!user) {
-    return NextResponse.json({ error: "E-mail ou senha invalidos." }, { status: 401 });
+    return NextResponse.json({ error: "CPF ou senha inválidos." }, { status: 401 });
   }
 
   await createSession(user.id);

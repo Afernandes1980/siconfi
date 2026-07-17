@@ -10,36 +10,14 @@ function requiredEnv(name: "TURSO_DATABASE_URL" | "TURSO_AUTH_TOKEN") {
   return value;
 }
 
-const databaseConfig = {
-  url: requiredEnv("TURSO_DATABASE_URL"),
-  authToken: requiredEnv("TURSO_AUTH_TOKEN"),
-};
-
-export let database = connect(databaseConfig);
-
-export async function withDatabaseRetry<T>(
-  operation: (client: typeof database) => Promise<T>,
-): Promise<T> {
-  try {
-    return await operation(database);
-  } catch (error) {
-    if (!isStaleConnectionError(error)) throw error;
-
-    try {
-      await database.close();
-    } catch {
-      // A conexao anterior ja pode estar encerrada.
-    }
-
-    database = connect(databaseConfig);
-    return operation(database);
-  }
+export function createDatabaseConnection() {
+  return connect({
+    url: requiredEnv("TURSO_DATABASE_URL"),
+    authToken: requiredEnv("TURSO_AUTH_TOKEN"),
+  });
 }
 
-function isStaleConnectionError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /HTTP error! status: 404|fetch failed|ECONNRESET|socket/i.test(message);
-}
+export const database = createDatabaseConnection();
 
 export const DATABASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS comparison_rules (
@@ -63,6 +41,7 @@ export const DATABASE_SCHEMA = `
     rule_code TEXT NOT NULL,
     period_index INTEGER NOT NULL CHECK (period_index BETWEEN 1 AND 12),
     completed_date TEXT NOT NULL,
+    quantity INTEGER,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (rule_code, period_index),
     FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
@@ -70,7 +49,7 @@ export const DATABASE_SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS comparison_rule_periodicities (
     rule_code TEXT PRIMARY KEY,
-    periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual')),
+    periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual', 'not_applicable')),
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
   );
@@ -188,6 +167,7 @@ export const DATABASE_SCHEMA = `
 
   CREATE TABLE IF NOT EXISTS app_users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cpf TEXT UNIQUE,
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
@@ -197,12 +177,61 @@ export const DATABASE_SCHEMA = `
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS organizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    document TEXT,
+    organization_type TEXT NOT NULL DEFAULT 'Prefeitura Municipal',
+    state TEXT,
+    municipality TEXT,
+    email TEXT,
+    environment TEXT NOT NULL DEFAULT 'production' CHECK (environment IN ('demonstration', 'production')),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS ibge_municipalities (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    state_code TEXT NOT NULL,
+    state_name TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ibge_municipalities_name ON ibge_municipalities (name);
+
+  CREATE TABLE IF NOT EXISTS organization_rule_periodicities (
+    organization_id INTEGER NOT NULL,
+    rule_code TEXT NOT NULL,
+    periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual', 'not_applicable')),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (organization_id, rule_code),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS organization_rule_checks (
+    organization_id INTEGER NOT NULL,
+    rule_code TEXT NOT NULL,
+    period_index INTEGER NOT NULL CHECK (period_index BETWEEN 1 AND 12),
+    completed_date TEXT NOT NULL,
+    quantity INTEGER,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (organization_id, rule_code, period_index),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS app_sessions (
     token_hash TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
+    organization_id INTEGER,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
   );
 
   CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id

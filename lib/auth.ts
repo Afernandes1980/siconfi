@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { initializeDatabase } from "@/lib/rules-db";
 import { verifyPassword } from "@/lib/password";
-import { database, withDatabaseRetry } from "@/lib/turso";
+import { createDatabaseConnection, database } from "@/lib/turso";
 
 const SESSION_COOKIE = "siconfi_session";
 const SESSION_DURATION_SECONDS = 12 * 60 * 60;
@@ -15,27 +15,50 @@ const DUMMY_PASSWORD_HASH =
 
 export type AuthUser = {
   id: number;
+  cpf: string;
   email: string;
   displayName: string;
   role: string;
+  organizationId: number | null;
+  organizationName: string | null;
 };
 
 function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function authenticateUser(email: string, password: string) {
+function firstResultRow<T>(result: { columns: string[]; rows: unknown[][] }) {
+  const row = result.rows[0];
+  return row ? Object.fromEntries(result.columns.map((column, index) => [column, row[index]])) as T : undefined;
+}
+
+async function executeAuthQuery(sql: string, args: unknown[] = []) {
+  try {
+    return await database.execute(sql, args);
+  } catch (error) {
+    if (!String(error).includes("404")) throw error;
+    const freshDatabase = createDatabaseConnection();
+    try {
+      return await freshDatabase.execute(sql, args);
+    } finally {
+      await freshDatabase.close();
+    }
+  }
+}
+
+export async function authenticateUser(cpf: string, password: string) {
   await initializeDatabase();
-  const normalizedEmail = email.trim().toLowerCase();
-  const row = await withDatabaseRetry((client) => client.get(
+  const normalizedCpf = cpf.replace(/\D/g, "");
+  const result = await executeAuthQuery(
     `
-      SELECT id, email, display_name AS displayName, password_hash AS passwordHash, role
+      SELECT id, cpf, email, display_name AS displayName, password_hash AS passwordHash, role
       FROM app_users
-      WHERE email = ? AND active = 1
+      WHERE cpf = ? AND active = 1
       LIMIT 1
     `,
-    normalizedEmail,
-  )) as (AuthUser & { passwordHash: string }) | undefined;
+    [normalizedCpf],
+  );
+  const row = firstResultRow<AuthUser & { passwordHash: string }>(result);
 
   const passwordMatches = await verifyPassword(
     password,
@@ -46,9 +69,12 @@ export async function authenticateUser(email: string, password: string) {
 
   return {
     id: Number(row.id),
+    cpf: String(row.cpf),
     email: String(row.email),
     displayName: String(row.displayName),
     role: String(row.role),
+    organizationId: null,
+    organizationName: null,
   } satisfies AuthUser;
 }
 
@@ -92,31 +118,58 @@ export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
   if (!token) return null;
 
   await initializeDatabase();
-  const row = await withDatabaseRetry((client) => client.get(
+  const result = await executeAuthQuery(
     `
-      SELECT u.id, u.email, u.display_name AS displayName, u.role
+      SELECT u.id, u.cpf, u.email, u.display_name AS displayName, u.role,
+        o.id AS organizationId, o.name AS organizationName
       FROM app_sessions s
       INNER JOIN app_users u ON u.id = s.user_id
+      LEFT JOIN organizations o ON o.id = s.organization_id AND o.active = 1
       WHERE s.token_hash = ?
         AND datetime(s.expires_at) > CURRENT_TIMESTAMP
         AND u.active = 1
       LIMIT 1
     `,
-    hashSessionToken(token),
-  )) as AuthUser | undefined;
+    [hashSessionToken(token)],
+  );
+  const row = firstResultRow<AuthUser>(result);
 
   if (!row) return null;
 
   return {
     id: Number(row.id),
+    cpf: String(row.cpf),
     email: String(row.email),
     displayName: String(row.displayName),
     role: String(row.role),
+    organizationId: row.organizationId == null ? null : Number(row.organizationId),
+    organizationName: row.organizationName == null ? null : String(row.organizationName),
   };
 });
+
+export async function selectCurrentOrganization(organizationId: number) {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!token) return false;
+  await initializeDatabase();
+  const organizationResult = await executeAuthQuery("SELECT id FROM organizations WHERE id = ? AND active = 1", [organizationId]);
+  const organization = firstResultRow<{ id: number }>(organizationResult);
+  if (!organization) return false;
+  await database.execute(
+    "UPDATE app_sessions SET organization_id = ? WHERE token_hash = ?",
+    [organizationId, hashSessionToken(token)],
+  );
+  return true;
+}
 
 export async function requireUser() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  return user;
+}
+
+export async function requireOrganization() {
+  const user = await requireUser();
+  if (!user.organizationId) redirect("/empresas");
   return user;
 }

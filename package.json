@@ -9,6 +9,7 @@
     "db:migrate:local": "node scripts/migrate-local-sqlite.mjs",
     "auth:create-user": "node scripts/create-user.mjs",
     "import:rules": "node scripts/import-comparison-rules.mjs",
+    "rules:renumber-new": "node scripts/renumber-new-rules.mjs",
     "import:msc-layout": "node scripts/import-msc-layout.mjs",
     "start": "next start",
     "lint": "next lint"

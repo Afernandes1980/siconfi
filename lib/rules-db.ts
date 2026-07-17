@@ -23,11 +23,12 @@ export type ComparisonRuleCheck = {
   ruleCode: string;
   periodIndex: number;
   completedDate: string;
+  quantity: number | null;
 };
 
 export type ComparisonRulePeriodicity = {
   ruleCode: string;
-  periodicity: "monthly" | "bimonthly" | "four_monthly" | "annual";
+  periodicity: "monthly" | "bimonthly" | "four_monthly" | "annual" | "not_applicable";
 };
 
 export type AccountNature = {
@@ -115,8 +116,68 @@ export function initializeDatabase() {
 
 async function initialize() {
   await database.exec(DATABASE_SCHEMA);
+  await migrateAppUsersCpf();
+  await migrateComparisonRulePeriodicities();
+  await migrateComparisonRuleCheckQuantities();
+  await migrateOrganizations();
   await seedAccountNatures();
   await seedOfficialFiscalPackage();
+}
+
+async function migrateOrganizations() {
+  const result = await database.execute("PRAGMA table_info(app_sessions)");
+  const hasOrganizationId = result.rows.some((row: unknown[]) => String(row[1]) === "organization_id");
+  if (!hasOrganizationId) await database.execute("ALTER TABLE app_sessions ADD COLUMN organization_id INTEGER");
+  await database.execute(`
+    INSERT INTO organizations (code, name, organization_type, environment, active)
+    VALUES ('DEMO', 'Ambiente de Demonstração', 'Prefeitura Municipal', 'demonstration', 1)
+    ON CONFLICT(code) DO NOTHING
+  `);
+  await database.execute(`
+    INSERT OR IGNORE INTO organization_rule_periodicities (organization_id, rule_code, periodicity, updated_at)
+    SELECT o.id, p.rule_code, p.periodicity, p.updated_at
+    FROM comparison_rule_periodicities p JOIN organizations o ON o.code = 'DEMO'
+  `);
+  await database.execute(`
+    INSERT OR IGNORE INTO organization_rule_checks (organization_id, rule_code, period_index, completed_date, quantity, updated_at)
+    SELECT o.id, c.rule_code, c.period_index, c.completed_date, c.quantity, c.updated_at
+    FROM comparison_rule_checks c JOIN organizations o ON o.code = 'DEMO'
+  `);
+}
+
+async function migrateAppUsersCpf() {
+  const result = await database.execute("PRAGMA table_info(app_users)");
+  const hasCpf = result.rows.some((row: unknown[]) => String(row[1]) === "cpf");
+  if (!hasCpf) await database.execute("ALTER TABLE app_users ADD COLUMN cpf TEXT");
+  await database.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_cpf ON app_users (cpf)");
+}
+
+async function migrateComparisonRuleCheckQuantities() {
+  const result = await database.execute("PRAGMA table_info(comparison_rule_checks)");
+  const hasQuantity = result.rows.some((row: unknown[]) => String(row[1]) === "quantity");
+  if (!hasQuantity) await database.execute("ALTER TABLE comparison_rule_checks ADD COLUMN quantity INTEGER");
+}
+
+async function migrateComparisonRulePeriodicities() {
+  const result = await database.execute(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'comparison_rule_periodicities'",
+  );
+  const tableSql = String(result.rows[0]?.[0] ?? "");
+
+  if (!tableSql || tableSql.includes("not_applicable")) return;
+
+  await database.exec(`
+    ALTER TABLE comparison_rule_periodicities RENAME TO comparison_rule_periodicities_legacy;
+    CREATE TABLE comparison_rule_periodicities (
+      rule_code TEXT PRIMARY KEY,
+      periodicity TEXT NOT NULL CHECK (periodicity IN ('monthly', 'bimonthly', 'four_monthly', 'annual', 'not_applicable')),
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
+    );
+    INSERT INTO comparison_rule_periodicities (rule_code, periodicity, updated_at)
+      SELECT rule_code, periodicity, updated_at FROM comparison_rule_periodicities_legacy;
+    DROP TABLE comparison_rule_periodicities_legacy;
+  `);
 }
 
 async function seedAccountNatures() {
@@ -246,52 +307,56 @@ export async function upsertComparisonRule(
   );
 }
 
-export async function listComparisonRuleChecks() {
+export async function listComparisonRuleChecks(organizationId: number) {
   await initializeDatabase();
   const result = await database.execute(`
-    SELECT rule_code AS ruleCode, period_index AS periodIndex, completed_date AS completedDate
-    FROM comparison_rule_checks
+    SELECT rule_code AS ruleCode, period_index AS periodIndex, completed_date AS completedDate, quantity
+    FROM organization_rule_checks
+    WHERE organization_id = ?
     ORDER BY rule_code, period_index
-  `);
+  `, [organizationId]);
 
   return resultRows<ComparisonRuleCheck>(result);
 }
 
-export async function listComparisonRulePeriodicities() {
+export async function listComparisonRulePeriodicities(organizationId: number) {
   await initializeDatabase();
   const result = await database.execute(`
     SELECT rule_code AS ruleCode, periodicity
-    FROM comparison_rule_periodicities
+    FROM organization_rule_periodicities
+    WHERE organization_id = ?
     ORDER BY rule_code
-  `);
+  `, [organizationId]);
 
   return resultRows<ComparisonRulePeriodicity>(result);
 }
 
 export async function saveComparisonRuleChecks(
+  organizationId: number,
   ruleCode: string,
   periodicity: ComparisonRulePeriodicity["periodicity"],
   dates: string[],
+  quantities: Array<number | null>,
 ) {
   await initializeDatabase();
   await database.batch(
     [{
-      sql: "INSERT INTO comparison_rule_periodicities (rule_code, periodicity) VALUES (?, ?) ON CONFLICT(rule_code) DO UPDATE SET periodicity = excluded.periodicity, updated_at = CURRENT_TIMESTAMP",
-      args: [ruleCode, periodicity],
+      sql: "INSERT INTO organization_rule_periodicities (organization_id, rule_code, periodicity) VALUES (?, ?, ?) ON CONFLICT(organization_id, rule_code) DO UPDATE SET periodicity = excluded.periodicity, updated_at = CURRENT_TIMESTAMP",
+      args: [organizationId, ruleCode, periodicity],
     }, {
-      sql: "DELETE FROM comparison_rule_checks WHERE rule_code = ? AND period_index > ?",
-      args: [ruleCode, dates.length],
-    }, ...dates.map((completedDate, index) => completedDate
+      sql: "DELETE FROM organization_rule_checks WHERE organization_id = ? AND rule_code = ? AND period_index > ?",
+      args: [organizationId, ruleCode, dates.length],
+    }, ...dates.map((completedDate, index) => completedDate || quantities[index] !== null
       ? {
-          sql: `INSERT INTO comparison_rule_checks (rule_code, period_index, completed_date)
-                VALUES (?, ?, ?)
-                ON CONFLICT(rule_code, period_index) DO UPDATE SET
-                  completed_date = excluded.completed_date, updated_at = CURRENT_TIMESTAMP`,
-          args: [ruleCode, index + 1, completedDate],
+          sql: `INSERT INTO organization_rule_checks (organization_id, rule_code, period_index, completed_date, quantity)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(organization_id, rule_code, period_index) DO UPDATE SET
+                  completed_date = excluded.completed_date, quantity = excluded.quantity, updated_at = CURRENT_TIMESTAMP`,
+          args: [organizationId, ruleCode, index + 1, completedDate, quantities[index]],
         }
       : {
-          sql: "DELETE FROM comparison_rule_checks WHERE rule_code = ? AND period_index = ?",
-          args: [ruleCode, index + 1],
+          sql: "DELETE FROM organization_rule_checks WHERE organization_id = ? AND rule_code = ? AND period_index = ?",
+          args: [organizationId, ruleCode, index + 1],
         })],
     "immediate",
   );
