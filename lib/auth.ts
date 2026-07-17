@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { initializeDatabase } from "@/lib/rules-db";
 import { verifyPassword } from "@/lib/password";
-import { database } from "@/lib/turso";
+import { database, withDatabaseRetry } from "@/lib/turso";
 
 const SESSION_COOKIE = "siconfi_session";
 const SESSION_DURATION_SECONDS = 12 * 60 * 60;
@@ -27,7 +27,7 @@ function hashSessionToken(token: string) {
 export async function authenticateUser(email: string, password: string) {
   await initializeDatabase();
   const normalizedEmail = email.trim().toLowerCase();
-  const row = await database.get(
+  const row = await withDatabaseRetry((client) => client.get(
     `
       SELECT id, email, display_name AS displayName, password_hash AS passwordHash, role
       FROM app_users
@@ -35,7 +35,7 @@ export async function authenticateUser(email: string, password: string) {
       LIMIT 1
     `,
     normalizedEmail,
-  ) as (AuthUser & { passwordHash: string }) | undefined;
+  )) as (AuthUser & { passwordHash: string }) | undefined;
 
   const passwordMatches = await verifyPassword(
     password,
@@ -92,7 +92,7 @@ export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
   if (!token) return null;
 
   await initializeDatabase();
-  const row = await database.get(
+  const row = await withDatabaseRetry((client) => client.get(
     `
       SELECT u.id, u.email, u.display_name AS displayName, u.role
       FROM app_sessions s
@@ -103,7 +103,7 @@ export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
       LIMIT 1
     `,
     hashSessionToken(token),
-  ) as AuthUser | undefined;
+  )) as AuthUser | undefined;
 
   if (!row) return null;
 

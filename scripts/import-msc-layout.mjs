@@ -28,6 +28,17 @@ await database.exec(`
   CREATE INDEX IF NOT EXISTS idx_msc_layout_sheets_sheet
     ON msc_layout_sheets (sheet_name);
 
+  CREATE TABLE IF NOT EXISTS power_bodies_2026 (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_power_bodies_2026_name
+    ON power_bodies_2026 (name);
+
   CREATE TABLE IF NOT EXISTS pcasp_extended_2026 (
     account TEXT PRIMARY KEY,
     class TEXT NOT NULL,
@@ -125,10 +136,21 @@ const upsertPcaspSql = `
     updated_at = CURRENT_TIMESTAMP
 `;
 
+const upsertPowerBodySql = `
+  INSERT INTO power_bodies_2026 (code, name, source_file)
+  VALUES (:code, :name, :sourceFile)
+  ON CONFLICT(code) DO UPDATE SET
+    name = excluded.name,
+    source_file = excluded.source_file,
+    updated_at = CURRENT_TIMESTAMP
+`;
+
 let rawRows = 0;
 let pcaspRows = 0;
+let powerBodyRows = 0;
 const rawStatements = [];
 const pcaspStatements = [];
+const powerBodyStatements = [];
 
 try {
   for (const sheetName of workbook.SheetNames) {
@@ -179,10 +201,25 @@ try {
         pcaspRows += 1;
       }
     }
+
+    if (normalize(sheetName) === "po") {
+      for (const row of rows.slice(5)) {
+        const code = normalizeCode(row[0]);
+        const name = clean(row[1]);
+        if (!code || !name) continue;
+
+        powerBodyStatements.push({
+          sql: upsertPowerBodySql,
+          args: { code, name, sourceFile },
+        });
+        powerBodyRows += 1;
+      }
+    }
   }
 
   await executeInBatches(rawStatements);
   await executeInBatches(pcaspStatements);
+  await executeInBatches(powerBodyStatements);
 } catch (error) {
   throw error;
 } finally {
@@ -191,6 +228,7 @@ try {
 
 console.log(`Linhas brutas importadas/atualizadas: ${rawRows}`);
 console.log(`Contas PCASP importadas/atualizadas: ${pcaspRows}`);
+console.log(`Poderes e orgaos (PO) importados/atualizados: ${powerBodyRows}`);
 console.log("Banco: Turso");
 
 function clean(value) {
@@ -209,6 +247,10 @@ function normalizeAccount(value) {
   const raw = clean(value).replace(/\.0$/, "");
   const digits = raw.replace(/\D/g, "");
   return digits ? digits.padStart(9, "0") : "";
+}
+
+function normalizeCode(value) {
+  return clean(value).replace(/\.0$/, "").replace(/\D/g, "");
 }
 
 function normalizeBalanceNature(value) {

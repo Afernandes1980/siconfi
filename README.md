@@ -104,6 +104,9 @@ O banco contém as seguintes tabelas:
 - `comparison_rules`: checklist e regras de comparação importadas.
 - `account_natures`: natureza padrão das classes contábeis; recebe automaticamente as classes 1 a 8.
 - `msc_layout_sheets`: linhas brutas importadas do leiaute MSC.
+- `power_bodies_2026`: códigos e nomenclaturas da aba `PO` (Poder e Órgão).
+- `msc_balance_imports`: competências das MSC importadas para a regra `D1_00020`.
+- `msc_balance_rows`: saldos iniciais e finais da MSC por competência e chave dimensional.
 - `pcasp_extended_2026`: contas e naturezas do PCASP Estendido 2026.
 - `official_fiscal_documents`: metadados dos documentos fiscais oficiais.
 - `official_fiscal_rules`: regras fiscais oficiais exibidas pela aplicação.
@@ -156,7 +159,7 @@ O importador do leiaute MSC exige o caminho de um arquivo XLS/XLSX:
 npm run import:msc-layout -- "C:\caminho\Leiaute_MSC_2026.xlsx"
 ```
 
-Todas as linhas das planilhas são armazenadas em `msc_layout_sheets`. Quando existe uma aba cujo nome normalizado seja `PCASPEstendido2026`, suas contas também são inseridas ou atualizadas em `pcasp_extended_2026`.
+Todas as linhas das planilhas são armazenadas em `msc_layout_sheets`. Quando existe uma aba cujo nome normalizado seja `PCASPEstendido2026`, suas contas também são inseridas ou atualizadas em `pcasp_extended_2026`. A aba `PO` é incorporada de forma estruturada em `power_bodies_2026`.
 
 Esse passo é necessário para que a validação de natureza contábil encontre as contas oficiais do PCASP.
 
@@ -202,5 +205,10 @@ scripts/
 - `GET /api/comparison-rules`: regras importadas, resumo e pacote fiscal oficial.
 - `GET /api/account-natures`: natureza padrão por classe contábil.
 - `GET /api/pcasp-accounts`: contas do PCASP Estendido 2026.
+- `GET /api/power-bodies`: códigos oficiais de Poder e Órgão da aba `PO`.
+- `GET /api/msc-balances`: consulta o histórico do exercício mais recente (`D1_00020`).
+- `POST /api/msc-balances`: grava os saldos da MSC e compara competências consecutivas (`D1_00020`).
+
+Na regra `D1_00020`, cada competência permanece armazenada separadamente, permitindo manter os doze meses do exercício. Depois de cada importação, todas as transições mensais disponíveis no exercício são recalculadas. Saldos iniciais (`beginning_balance`) iguais a zero são desconsiderados na comparação com o saldo final do mês anterior.
 
 As APIs usam o runtime Node.js e acessam o Turso pelas credenciais privadas do ambiente.
