@@ -191,6 +191,11 @@ export default function CsvComparator({
   const [officialFiscalDocuments, setOfficialFiscalDocuments] = useState<OfficialFiscalDocument[]>([]);
   const [officialFiscalRules, setOfficialFiscalRules] = useState<OfficialFiscalRule[]>([]);
   const [pcaspAccounts, setPcaspAccounts] = useState<PcaspAccount[]>([]);
+  const [powerBodies, setPowerBodies] = useState<PowerBody[]>([]);
+  const [balanceComparison, setBalanceComparison] = useState<MscBalanceComparison | null>(null);
+  const [balanceExercise, setBalanceExercise] = useState<MscExerciseSummary | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState("");
   const [activeRegistration, setActiveRegistration] = useState<"users" | "organizations" | null>(null);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -1785,6 +1790,28 @@ function validatePowerBodies(csv: ParsedCsv, powerBodies: PowerBody[]): PowerBod
 
 function normalizePowerBodyCode(value: string) {
   return value.trim().replace(/\.0$/, "").replace(/\D/g, "");
+}
+
+function formatBalance(value: number | null, nature: string) {
+  if (value === null) return "-";
+
+  const formatted = new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+
+  return nature ? `${formatted} (${nature})` : formatted;
+}
+
+function balanceDifferenceLabel(reason: MscBalanceDifference["reason"]) {
+  const labels: Record<MscBalanceDifference["reason"], string> = {
+    different_value: "Valor diferente",
+    different_nature: "Natureza diferente",
+    missing_ending: "Saldo final ausente",
+    missing_beginning: "Saldo inicial ausente",
+  };
+
+  return labels[reason];
 }
 
 function validateAccountNatures(csv: ParsedCsv, pcaspAccounts: PcaspAccount[]) {
