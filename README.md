@@ -1,4 +1,4 @@
-# Siconfi
+# Siconfi 
 
 Aplicação web para análise do Ranking Municipal da STN. O sistema compara dados da Matriz com arquivos fiscais, aplica regras de validação de 2026 e verifica a natureza contábil das contas com base no PCASP Estendido.
 
