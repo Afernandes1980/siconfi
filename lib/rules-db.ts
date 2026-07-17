@@ -6,6 +6,7 @@ import {
   type OfficialFiscalRule,
 } from "@/lib/official-fiscal-rules";
 import { DATABASE_SCHEMA, database } from "@/lib/turso";
+import type { MscBalanceRow } from "@/lib/msc-balances";
 
 export type StoredComparisonRule = {
   id: number;
@@ -46,6 +47,48 @@ export type PcaspAccount = {
   complementaryInfoId: string;
   complementaryInfo: string;
   sourceFile: string;
+};
+
+export type PowerBody = {
+  code: string;
+  name: string;
+  sourceFile: string;
+};
+
+export type MscBalanceDifference = {
+  comparisonKey: string;
+  keyValues: string[];
+  previousRowNumber: number | null;
+  currentRowNumber: number | null;
+  endingValue: number | null;
+  beginningValue: number | null;
+  endingNature: string;
+  beginningNature: string;
+  reason: "different_value" | "different_nature" | "missing_ending" | "missing_beginning";
+};
+
+export type MscBalanceComparison = {
+  competenceKey: string;
+  previousCompetenceKey: string;
+  compared: number;
+  ignoredZeroBeginning: number;
+  storedCompetences: string[];
+  exercise: MscExerciseSummary;
+  differences: MscBalanceDifference[];
+  status: "compared" | "no_previous";
+};
+
+export type MscExerciseSummary = {
+  year: string;
+  storedCompetences: string[];
+  transitions: Array<{
+    previousCompetenceKey: string;
+    competenceKey: string;
+    status: "compared" | "pending";
+    compared: number;
+    ignoredZeroBeginning: number;
+    differences: number;
+  }>;
 };
 
 export type StoredOfficialFiscalRule = OfficialFiscalRule & {
@@ -361,6 +404,263 @@ export async function listPcaspAccounts() {
   `);
 
   return resultRows<PcaspAccount>(result);
+}
+
+export async function listPowerBodies() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT code, name, source_file AS sourceFile
+    FROM power_bodies_2026
+    ORDER BY code
+  `);
+
+  return resultRows<PowerBody>(result);
+}
+
+export async function saveAndCompareMscBalances(
+  competenceKey: string,
+  competenceLabel: string,
+  sourceFile: string,
+  rows: MscBalanceRow[],
+): Promise<MscBalanceComparison> {
+  await initializeDatabase();
+
+  await database.batch([
+    { sql: "DELETE FROM msc_balance_rows WHERE competence_key = ?", args: [competenceKey] },
+    {
+      sql: `INSERT INTO msc_balance_imports (competence_key, competence_label, source_file)
+            VALUES (?, ?, ?)
+            ON CONFLICT(competence_key) DO UPDATE SET
+              competence_label = excluded.competence_label,
+              source_file = excluded.source_file,
+              imported_at = CURRENT_TIMESTAMP`,
+      args: [competenceKey, competenceLabel, sourceFile],
+    },
+  ], "immediate");
+
+  const statements = rows.map((row) => ({
+    sql: `INSERT INTO msc_balance_rows (
+            competence_key, comparison_key, key_json, value_type, balance_value,
+            raw_value, value_nature, row_number
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(competence_key, comparison_key, value_type) DO UPDATE SET
+            key_json = excluded.key_json,
+            balance_value = excluded.balance_value,
+            raw_value = excluded.raw_value,
+            value_nature = excluded.value_nature,
+            row_number = excluded.row_number`,
+    args: [
+      competenceKey,
+      row.comparisonKey,
+      JSON.stringify(row.keyValues),
+      row.valueType,
+      row.value,
+      row.rawValue,
+      row.nature,
+      row.rowNumber,
+    ],
+  }));
+
+  for (let index = 0; index < statements.length; index += 400) {
+    await database.batch(statements.slice(index, index + 400), "immediate");
+  }
+
+  const previousCompetenceKey = previousMonth(competenceKey);
+  const previousImport = await database.get(
+    "SELECT competence_key FROM msc_balance_imports WHERE competence_key = ? LIMIT 1",
+    previousCompetenceKey,
+  );
+  const storedCompetencesResult = await database.execute(`
+    SELECT competence_key AS competenceKey
+    FROM msc_balance_imports
+    ORDER BY competence_key
+  `);
+  const storedCompetences = resultRows<{ competenceKey: string }>(storedCompetencesResult)
+    .map((item) => item.competenceKey);
+  const exercise = await getMscExerciseSummary(competenceKey.slice(0, 4));
+
+  if (!previousImport) {
+    return {
+      competenceKey,
+      previousCompetenceKey,
+      compared: 0,
+      ignoredZeroBeginning: 0,
+      storedCompetences,
+      exercise,
+      differences: [],
+      status: "no_previous",
+    };
+  }
+
+  const result = await database.execute(
+    `SELECT competence_key AS competenceKey, comparison_key AS comparisonKey,
+                 key_json AS keyJson, value_type AS valueType, balance_value AS balanceValue,
+                 value_nature AS valueNature, row_number AS rowNumber
+          FROM msc_balance_rows
+          WHERE (competence_key = ? AND value_type = 'ending_balance')
+             OR (competence_key = ? AND value_type = 'beginning_balance')`,
+    [previousCompetenceKey, competenceKey],
+  );
+  const balanceRows = resultRows<{
+    competenceKey: string;
+    comparisonKey: string;
+    keyJson: string;
+    valueType: string;
+    balanceValue: number | null;
+    valueNature: string;
+    rowNumber: number;
+  }>(result);
+  const endings = new Map(balanceRows.filter((row) => row.valueType === "ending_balance").map((row) => [row.comparisonKey, row]));
+  const beginnings = new Map(balanceRows.filter((row) => row.valueType === "beginning_balance").map((row) => [row.comparisonKey, row]));
+  const keys = new Set([...endings.keys(), ...beginnings.keys()]);
+  const differences: MscBalanceDifference[] = [];
+  let compared = 0;
+  let ignoredZeroBeginning = 0;
+
+  for (const comparisonKey of keys) {
+    const ending = endings.get(comparisonKey);
+    const beginning = beginnings.get(comparisonKey);
+
+    if (beginning?.balanceValue === 0) {
+      ignoredZeroBeginning += 1;
+      continue;
+    }
+
+    if (ending && beginning) compared += 1;
+
+    const reason = !ending
+      ? "missing_ending"
+      : !beginning
+        ? "missing_beginning"
+        : ending.valueNature !== beginning.valueNature
+          ? "different_nature"
+          : ending.balanceValue !== beginning.balanceValue
+            ? "different_value"
+            : null;
+    if (!reason) continue;
+
+    differences.push({
+      comparisonKey,
+      keyValues: parseJsonStringArray(ending?.keyJson ?? beginning?.keyJson ?? "[]"),
+      previousRowNumber: ending ? Number(ending.rowNumber) : null,
+      currentRowNumber: beginning ? Number(beginning.rowNumber) : null,
+      endingValue: ending?.balanceValue ?? null,
+      beginningValue: beginning?.balanceValue ?? null,
+      endingNature: ending?.valueNature ?? "",
+      beginningNature: beginning?.valueNature ?? "",
+      reason,
+    });
+  }
+
+  return {
+    competenceKey,
+    previousCompetenceKey,
+    compared,
+    ignoredZeroBeginning,
+    storedCompetences,
+    exercise,
+    differences,
+    status: "compared",
+  };
+}
+
+export async function getLatestMscExerciseSummary() {
+  await initializeDatabase();
+  const latest = await database.get(
+    "SELECT competence_key AS competenceKey FROM msc_balance_imports ORDER BY competence_key DESC LIMIT 1",
+  ) as { competenceKey?: string } | undefined;
+  return latest?.competenceKey
+    ? getMscExerciseSummary(latest.competenceKey.slice(0, 4))
+    : null;
+}
+
+async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> {
+  const importsResult = await database.execute(
+    `SELECT competence_key AS competenceKey
+     FROM msc_balance_imports
+     WHERE competence_key LIKE ?
+     ORDER BY competence_key`,
+    [`${year}-%`],
+  );
+  const storedCompetences = resultRows<{ competenceKey: string }>(importsResult)
+    .map((item) => item.competenceKey);
+  const stored = new Set(storedCompetences);
+  const balancesResult = await database.execute(
+    `SELECT competence_key AS competenceKey, comparison_key AS comparisonKey,
+            value_type AS valueType, balance_value AS balanceValue, value_nature AS valueNature
+     FROM msc_balance_rows
+     WHERE competence_key LIKE ?`,
+    [`${year}-%`],
+  );
+  const balances = resultRows<{
+    competenceKey: string;
+    comparisonKey: string;
+    valueType: string;
+    balanceValue: number | null;
+    valueNature: string;
+  }>(balancesResult);
+  const transitions: MscExerciseSummary["transitions"] = [];
+
+  for (let month = 2; month <= 12; month += 1) {
+    const previousCompetenceKey = `${year}-${String(month - 1).padStart(2, "0")}`;
+    const currentCompetenceKey = `${year}-${String(month).padStart(2, "0")}`;
+    if (!stored.has(previousCompetenceKey) || !stored.has(currentCompetenceKey)) {
+      transitions.push({
+        previousCompetenceKey,
+        competenceKey: currentCompetenceKey,
+        status: "pending",
+        compared: 0,
+        ignoredZeroBeginning: 0,
+        differences: 0,
+      });
+      continue;
+    }
+
+    const endings = new Map(
+      balances
+        .filter((row) => row.competenceKey === previousCompetenceKey && row.valueType === "ending_balance")
+        .map((row) => [row.comparisonKey, row]),
+    );
+    const beginnings = new Map(
+      balances
+        .filter((row) => row.competenceKey === currentCompetenceKey && row.valueType === "beginning_balance")
+        .map((row) => [row.comparisonKey, row]),
+    );
+    const keys = new Set([...endings.keys(), ...beginnings.keys()]);
+    let compared = 0;
+    let ignoredZeroBeginning = 0;
+    let differences = 0;
+
+    for (const key of keys) {
+      const ending = endings.get(key);
+      const beginning = beginnings.get(key);
+      if (beginning?.balanceValue === 0) {
+        ignoredZeroBeginning += 1;
+        continue;
+      }
+      if (ending && beginning) compared += 1;
+      if (!ending || !beginning || ending.balanceValue !== beginning.balanceValue || ending.valueNature !== beginning.valueNature) {
+        differences += 1;
+      }
+    }
+
+    transitions.push({
+      previousCompetenceKey,
+      competenceKey: currentCompetenceKey,
+      status: "compared",
+      compared,
+      ignoredZeroBeginning,
+      differences,
+    });
+  }
+
+  return { year, storedCompetences, transitions };
+}
+
+function previousMonth(competenceKey: string) {
+  const [year, month] = competenceKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 2, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export async function listOfficialFiscalDocuments() {

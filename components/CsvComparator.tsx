@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type ParsedCsv } from "@/lib/csv";
 import { parseSpreadsheet } from "@/lib/spreadsheet";
 import { parseCsvOrZip } from "@/lib/zip-csv";
+import { extractMscBalances } from "@/lib/msc-balances";
 import {
   validateFiscalFile,
   type FiscalValidationIssue,
@@ -73,6 +74,59 @@ type PcaspAccount = {
   title: string;
   balanceNature: string;
   normalizedNature: "D" | "C" | "D/C" | "";
+};
+
+type PowerBody = {
+  code: string;
+  name: string;
+};
+
+type PowerBodyIssue = {
+  rowNumber: number;
+  code: string;
+};
+
+type PowerBodyValidation = {
+  column: string;
+  checked: number;
+  valid: number;
+  issues: PowerBodyIssue[];
+};
+
+type MscBalanceDifference = {
+  comparisonKey: string;
+  keyValues: string[];
+  previousRowNumber: number | null;
+  currentRowNumber: number | null;
+  endingValue: number | null;
+  beginningValue: number | null;
+  endingNature: string;
+  beginningNature: string;
+  reason: "different_value" | "different_nature" | "missing_ending" | "missing_beginning";
+};
+
+type MscExerciseSummary = {
+    year: string;
+    storedCompetences: string[];
+    transitions: Array<{
+      previousCompetenceKey: string;
+      competenceKey: string;
+      status: "compared" | "pending";
+      compared: number;
+      ignoredZeroBeginning: number;
+      differences: number;
+    }>;
+};
+
+type MscBalanceComparison = {
+  competenceKey: string;
+  previousCompetenceKey: string;
+  compared: number;
+  ignoredZeroBeginning: number;
+  storedCompetences: string[];
+  exercise?: MscExerciseSummary;
+  differences: MscBalanceDifference[];
+  status: "compared" | "no_previous";
 };
 
 type AccountNatureIssue = {
@@ -184,6 +238,10 @@ export default function CsvComparator({
     () => validateAccountNatures(sourceCsv, pcaspAccounts),
     [pcaspAccounts, sourceCsv],
   );
+  const powerBodyValidation = useMemo(
+    () => validatePowerBodies(sourceCsv, powerBodies),
+    [powerBodies, sourceCsv],
+  );
   const fiscalValidation = useMemo(
     () => validateFiscalFile(targetCsv, targetName),
     [targetCsv, targetName],
@@ -245,6 +303,38 @@ export default function CsvComparator({
 
   useEffect(() => {
     let active = true;
+    fetch("/api/msc-balances", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { exercise?: MscExerciseSummary | null }) => {
+        if (active) setBalanceExercise(data.exercise ?? null);
+      })
+      .catch(() => {
+        if (active) setBalanceExercise(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/power-bodies", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { powerBodies: PowerBody[] }) => {
+        if (active) setPowerBodies(data.powerBodies ?? []);
+      })
+      .catch(() => {
+        if (active) setPowerBodies([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
 
     fetch("/api/pcasp-accounts", { cache: "no-store" })
       .then((response) => response.json())
@@ -271,6 +361,7 @@ export default function CsvComparator({
       setSourceName(imported.importedName);
       setSourceKey(imported.parsed.headers[0] ?? "");
       setMappings((current) => current.filter((mapping) => imported.parsed.headers.includes(mapping.sourceColumn)));
+      await saveMscBalanceHistory(imported.parsed, imported.importedName);
       return;
     }
 
@@ -278,6 +369,38 @@ export default function CsvComparator({
     setTargetName(file.name);
     setTargetKey(imported.parsed.headers[0] ?? "");
     setMappings((current) => current.filter((mapping) => imported.parsed.headers.includes(mapping.targetColumn)));
+  }
+
+  async function saveMscBalanceHistory(csv: ParsedCsv, importedName: string) {
+    const payload = extractMscBalances(csv);
+    setBalanceComparison(null);
+    setBalanceError("");
+
+    if (!payload.competenceKey) {
+      setBalanceError("Nao foi possivel identificar a competencia na celula B1 da MSC.");
+      return;
+    }
+    if (payload.rows.length === 0) {
+      setBalanceError("Nao foram encontrados saldos beginning_balance ou ending_balance nas tres ultimas colunas.");
+      return;
+    }
+
+    setBalanceLoading(true);
+    try {
+      const response = await fetch("/api/msc-balances", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, sourceFile: importedName }),
+      });
+      const data = await response.json() as MscBalanceComparison & { error?: string };
+      if (!response.ok) throw new Error(data.error || "Nao foi possivel gravar os saldos da MSC.");
+      setBalanceComparison(data);
+      setBalanceExercise(data.exercise ?? null);
+    } catch (error) {
+      setBalanceError(error instanceof Error ? error.message : "Nao foi possivel gravar os saldos da MSC.");
+    } finally {
+      setBalanceLoading(false);
+    }
   }
 
   async function handleLogout() {
@@ -489,12 +612,226 @@ export default function CsvComparator({
           </div>
         )}
 
+        <a
+          href="#validacao-d1-00019"
+          className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-pink-50 px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-100"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Validacao da MSC
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00019 — coluna B (IC1)</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
+        <a
+          href="#validacao-d1-00020"
+          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Historico de saldos da MSC
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00020 — continuidade entre competencias</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
         <FiscalRulesPanel
           validation={fiscalValidation}
           documents={officialFiscalDocuments}
           rules={officialFiscalRules}
           hasFiscalFile={targetCsv.rows.length > 0 || targetCsv.headers.length > 0}
         />
+
+        <section id="validacao-d1-00019" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00019</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Poder e Orgao (IC1)</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Confere os codigos da coluna B, identificada como IC1, com a tabela oficial power_bodies_2026.
+              </p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-right">
+              <p className="text-xs font-semibold uppercase text-rose-700">Codigos invalidos</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-950">{powerBodyValidation.issues.length}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <DataPoint label="Coluna analisada" value={powerBodyValidation.column ? 1 : 0} />
+            <DataPoint label="Codigos conferidos" value={powerBodyValidation.checked} />
+            <DataPoint label="Codigos validos" value={powerBodyValidation.valid} />
+          </div>
+
+          {sourceCsv.rows.length > 0 && !powerBodyValidation.column && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              A coluna B nao foi identificada como IC1. A regra D1_00019 nao pode ser conferida.
+            </div>
+          )}
+
+          {powerBodyValidation.column && powerBodyValidation.issues.length > 0 && (
+            <div className="mt-4 max-h-72 overflow-y-auto rounded-lg border border-rose-200">
+              <table className="w-full table-fixed text-left text-sm">
+                <thead className="sticky top-0 bg-rose-50 text-xs uppercase text-rose-700">
+                  <tr>
+                    <th className="w-28 px-4 py-3">Linha</th>
+                    <th className="w-40 px-4 py-3">Coluna</th>
+                    <th className="px-4 py-3">Codigo nao encontrado</th>
+                    <th className="px-4 py-3">Regra</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rose-100">
+                  {powerBodyValidation.issues.map((issue) => (
+                    <tr key={`${issue.rowNumber}-${issue.code}`} className="bg-rose-50/50 text-rose-800">
+                      <td className="px-4 py-3 font-semibold">{issue.rowNumber}</td>
+                      <td className="px-4 py-3 font-semibold">B (IC1)</td>
+                      <td className="break-words px-4 py-3 font-bold">{issue.code}</td>
+                      <td className="px-4 py-3 font-semibold">D1_00019</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section id="validacao-d1-00020" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00020</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Continuidade dos saldos entre competencias</h2>
+              <p className="mt-1 max-w-4xl text-sm text-slate-500">
+                Compara o ending_balance da competencia anterior com o beginning_balance da competencia importada,
+                usando como chave todas as colunas anteriores a Valor, Tipo de Valor e Natureza de Valor.
+              </p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-right">
+              <p className="text-xs font-semibold uppercase text-rose-700">Possiveis diferencas</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-950">
+                {balanceLoading ? "..." : balanceComparison?.differences.length ?? 0}
+              </p>
+            </div>
+          </div>
+
+          {balanceError && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              {balanceError}
+            </div>
+          )}
+
+          {balanceLoading && (
+            <div className="mt-4 rounded-lg border border-pink-200 bg-pink-50 px-4 py-3 text-sm font-medium text-pink-800">
+              Gravando os saldos e comparando as competencias...
+            </div>
+          )}
+
+          {balanceComparison?.status === "no_previous" && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Os saldos de {balanceComparison.competenceKey} foram gravados. Importe primeiro a MSC de {balanceComparison.previousCompetenceKey} para realizar a comparacao.
+            </div>
+          )}
+
+          {balanceComparison?.status === "compared" && (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <DataPoint label="Competencia anterior" value={Number(balanceComparison.previousCompetenceKey.replace("-", ""))} />
+                <DataPoint label="Competencia atual" value={Number(balanceComparison.competenceKey.replace("-", ""))} />
+                <DataPoint label="Chaves comparadas" value={balanceComparison.compared} />
+                <DataPoint label="Saldos iniciais zero ignorados" value={balanceComparison.ignoredZeroBeginning ?? 0} />
+              </div>
+
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-500">
+                  Competencias armazenadas ({balanceComparison.storedCompetences?.length ?? 0})
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-800">
+                  {balanceComparison.storedCompetences?.join(" · ") || "Nenhuma competencia armazenada"}
+                </p>
+              </div>
+
+              {balanceComparison.differences.length === 0 ? (
+                <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+                  Nenhuma diferenca encontrada entre o saldo final de {balanceComparison.previousCompetenceKey} e o saldo inicial de {balanceComparison.competenceKey}.
+                </div>
+              ) : (
+                <div className="mt-4 max-h-96 overflow-auto rounded-lg border border-rose-200">
+                  <table className="min-w-[1100px] w-full text-left text-sm">
+                    <thead className="sticky top-0 bg-rose-50 text-xs uppercase text-rose-700">
+                      <tr>
+                        <th className="px-4 py-3">Chave da linha</th>
+                        <th className="w-24 px-4 py-3">Linha ant.</th>
+                        <th className="w-24 px-4 py-3">Linha atual</th>
+                        <th className="w-40 px-4 py-3">Saldo final</th>
+                        <th className="w-40 px-4 py-3">Saldo inicial</th>
+                        <th className="w-48 px-4 py-3">Ocorrencia</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-rose-100">
+                      {balanceComparison.differences.map((difference) => (
+                        <tr key={difference.comparisonKey} className="bg-rose-50/40 text-rose-900">
+                          <td className="break-words px-4 py-3 text-xs">{difference.keyValues.join(" | ")}</td>
+                          <td className="px-4 py-3 font-semibold">{difference.previousRowNumber ?? "-"}</td>
+                          <td className="px-4 py-3 font-semibold">{difference.currentRowNumber ?? "-"}</td>
+                          <td className="px-4 py-3 font-semibold">{formatBalance(difference.endingValue, difference.endingNature)}</td>
+                          <td className="px-4 py-3 font-semibold">{formatBalance(difference.beginningValue, difference.beginningNature)}</td>
+                          <td className="px-4 py-3 font-semibold">{balanceDifferenceLabel(difference.reason)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {balanceExercise && (
+            <div className="mt-5 border-t border-slate-200 pt-5">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-slate-950">Analise do exercicio {balanceExercise.year}</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {balanceExercise.storedCompetences.length} de 12 competencias armazenadas.
+                  </p>
+                </div>
+                <span className="rounded-full bg-pink-100 px-3 py-1 text-sm font-semibold text-pink-800">
+                  {balanceExercise.transitions.filter((item) => item.status === "compared").length} de 11 transicoes analisadas
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {balanceExercise.transitions.map((transition) => (
+                  <div
+                    key={transition.competenceKey}
+                    className={`rounded-lg border px-4 py-3 ${
+                      transition.status === "pending"
+                        ? "border-slate-200 bg-slate-50 text-slate-600"
+                        : transition.differences > 0
+                          ? "border-rose-200 bg-rose-50 text-rose-800"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    }`}
+                  >
+                    <p className="text-xs font-semibold uppercase opacity-75">
+                      {transition.previousCompetenceKey} → {transition.competenceKey}
+                    </p>
+                    <p className="mt-2 text-lg font-bold">
+                      {transition.status === "pending"
+                        ? "Aguardando competencias"
+                        : `${transition.differences} possiveis diferencas`}
+                    </p>
+                    {transition.status === "compared" && (
+                      <p className="mt-1 text-xs">
+                        {transition.compared} chaves · {transition.ignoredZeroBeginning} saldos zero ignorados
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
 
         <section className="panel mt-5 p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1025,7 +1362,7 @@ function inferRulePeriodicity(item: string): PeriodicityKey {
   return "annual";
 }
 
-function getRulePeriodicity(key: PeriodicityKey): RulePeriodicity {
+function getRulePeriodicity(key: PeriodicityKey | string | null | undefined): RulePeriodicity {
   const periodicities: Record<PeriodicityKey, RulePeriodicity> = {
     monthly: { key: "monthly", label: "Mensal", periods: 12, periodLabel: "Mês" },
     bimonthly: { key: "bimonthly", label: "Bimestral", periods: 6, periodLabel: "Bimestre" },
@@ -1033,7 +1370,7 @@ function getRulePeriodicity(key: PeriodicityKey): RulePeriodicity {
     annual: { key: "annual", label: "Anual", periods: 1, periodLabel: "Ano" },
     not_applicable: { key: "not_applicable", label: "Não se aplica", periods: 0, periodLabel: "Período" },
   };
-  return periodicities[key];
+  return periodicities[key as PeriodicityKey] ?? periodicities.annual;
 }
 
 function formatDate(value: string) {
@@ -1409,6 +1746,45 @@ function FiscalIssueRow({ issue }: { issue: FiscalValidationIssue }) {
       <td className="break-words px-4 py-3">{issue.message}</td>
     </tr>
   );
+}
+
+function validatePowerBodies(csv: ParsedCsv, powerBodies: PowerBody[]): PowerBodyValidation {
+  const column = csv.headers[1] && normalizeHeaderKey(csv.headers[1]) === "ic1"
+    ? csv.headers[1]
+    : "";
+
+  if (!column || powerBodies.length === 0) {
+    return { column, checked: 0, valid: 0, issues: [] };
+  }
+
+  const officialCodes = new Set(powerBodies.map((item) => normalizePowerBodyCode(item.code)).filter(Boolean));
+  const issues: PowerBodyIssue[] = [];
+  let checked = 0;
+  let valid = 0;
+
+  csv.rows.forEach((row, index) => {
+    const rawCode = (row[column] ?? "").trim();
+    if (!rawCode) return;
+
+    const code = normalizePowerBodyCode(rawCode);
+    checked += 1;
+
+    if (code && officialCodes.has(code)) {
+      valid += 1;
+      return;
+    }
+
+    issues.push({
+      rowNumber: Number(row.__rowNumber) || index + 3,
+      code: rawCode,
+    });
+  });
+
+  return { column, checked, valid, issues };
+}
+
+function normalizePowerBodyCode(value: string) {
+  return value.trim().replace(/\.0$/, "").replace(/\D/g, "");
 }
 
 function validateAccountNatures(csv: ParsedCsv, pcaspAccounts: PcaspAccount[]) {

@@ -4,6 +4,7 @@ export type ParsedCsv = {
   headers: string[];
   rows: CsvRow[];
   delimiter: string;
+  metadataRows?: string[][];
 };
 
 type ParseCsvOptions = {
@@ -24,7 +25,7 @@ export function parseCsv(text: string, options: ParseCsvOptions | string = {}): 
   );
 
   if (records.length === 0) {
-    return { headers: [], rows: [], delimiter: selectedDelimiter };
+    return { headers: [], rows: [], delimiter: selectedDelimiter, metadataRows: [] };
   }
 
   const hasHeader = parseOptions.hasHeader ?? true;
@@ -47,7 +48,12 @@ export function parseCsv(text: string, options: ParseCsvOptions | string = {}): 
     }, {}),
   );
 
-  return { headers, rows, delimiter: selectedDelimiter };
+  return {
+    headers,
+    rows,
+    delimiter: selectedDelimiter,
+    metadataRows: records.slice(0, dataStartRowIndex),
+  };
 }
 
 function detectDelimiter(text: string) {

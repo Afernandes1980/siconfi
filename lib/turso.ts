@@ -74,6 +74,40 @@ export const DATABASE_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_msc_layout_sheets_sheet
     ON msc_layout_sheets (sheet_name);
 
+  CREATE TABLE IF NOT EXISTS power_bodies_2026 (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_power_bodies_2026_name
+    ON power_bodies_2026 (name);
+
+  CREATE TABLE IF NOT EXISTS msc_balance_imports (
+    competence_key TEXT PRIMARY KEY,
+    competence_label TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS msc_balance_rows (
+    competence_key TEXT NOT NULL,
+    comparison_key TEXT NOT NULL,
+    key_json TEXT NOT NULL,
+    value_type TEXT NOT NULL CHECK (value_type IN ('beginning_balance', 'ending_balance')),
+    balance_value REAL,
+    raw_value TEXT NOT NULL,
+    value_nature TEXT NOT NULL,
+    row_number INTEGER NOT NULL,
+    PRIMARY KEY (competence_key, comparison_key, value_type),
+    FOREIGN KEY (competence_key) REFERENCES msc_balance_imports(competence_key) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_msc_balance_rows_comparison
+    ON msc_balance_rows (comparison_key, competence_key, value_type);
+
   CREATE TABLE IF NOT EXISTS pcasp_extended_2026 (
     account TEXT PRIMARY KEY,
     class TEXT NOT NULL,
