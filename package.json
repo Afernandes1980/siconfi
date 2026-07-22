@@ -11,6 +11,7 @@
     "import:rules": "node scripts/import-comparison-rules.mjs",
     "rules:renumber-new": "node scripts/renumber-new-rules.mjs",
     "import:msc-layout": "node scripts/import-msc-layout.mjs",
+    "import:resource-sources": "node scripts/import-resource-sources.mjs",
     "start": "next start",
     "lint": "next lint"
   },

@@ -55,6 +55,16 @@ export type PowerBody = {
   sourceFile: string;
 };
 
+export type ResourceSource = {
+  code: string;
+  initialCode: string;
+  initialName: string;
+  mainCode: string;
+  mainName: string;
+  category: string;
+  sourceFile: string;
+};
+
 export type MscBalanceDifference = {
   comparisonKey: string;
   keyValues: string[];
@@ -81,6 +91,25 @@ export type MscBalanceComparison = {
 export type MscExerciseSummary = {
   year: string;
   storedCompetences: string[];
+  executivePowerBodies: Array<{
+    code: string;
+    name: string;
+    competences: string[];
+    occurrences: number;
+  }>;
+  executiveConsistent: boolean;
+  legislativePowerBodies: Array<{
+    code: string;
+    name: string;
+    competences: string[];
+    occurrences: number;
+  }>;
+  legislativeConsistent: boolean;
+  legislativeDataCompetences: string[];
+  legislativeDuplicateGroups: Array<{
+    competences: string[];
+    rows: number;
+  }>;
   transitions: Array<{
     previousCompetenceKey: string;
     competenceKey: string;
@@ -417,11 +446,26 @@ export async function listPowerBodies() {
   return resultRows<PowerBody>(result);
 }
 
+export async function listResourceSources() {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT code, initial_code AS initialCode, initial_name AS initialName,
+           main_code AS mainCode, main_name AS mainName, category,
+           source_file AS sourceFile
+    FROM resource_sources_2026
+    ORDER BY code
+  `);
+
+  return resultRows<ResourceSource>(result);
+}
+
 export async function saveAndCompareMscBalances(
   competenceKey: string,
   competenceLabel: string,
   sourceFile: string,
   rows: MscBalanceRow[],
+  powerBodyCodes: Array<{ code: string; count: number }> = [],
+  powerBodyRows: Array<{ code: string; signature: string; count: number }> = [],
 ): Promise<MscBalanceComparison> {
   await initializeDatabase();
 
@@ -463,6 +507,30 @@ export async function saveAndCompareMscBalances(
 
   for (let index = 0; index < statements.length; index += 400) {
     await database.batch(statements.slice(index, index + 400), "immediate");
+  }
+
+  await database.execute("DELETE FROM msc_power_body_usage WHERE competence_key = ?", [competenceKey]);
+  if (powerBodyCodes.length > 0) {
+    await database.batch(powerBodyCodes.map((item) => ({
+      sql: `INSERT INTO msc_power_body_usage (competence_key, code, occurrence_count)
+            VALUES (?, ?, ?)
+            ON CONFLICT(competence_key, code) DO UPDATE SET
+              occurrence_count = excluded.occurrence_count`,
+      args: [competenceKey, item.code, item.count],
+    })), "immediate");
+  }
+
+  await database.execute("DELETE FROM msc_power_body_rows WHERE competence_key = ?", [competenceKey]);
+  if (powerBodyRows.length > 0) {
+    for (let index = 0; index < powerBodyRows.length; index += 400) {
+      await database.batch(powerBodyRows.slice(index, index + 400).map((item) => ({
+        sql: `INSERT INTO msc_power_body_rows (competence_key, code, row_signature, occurrence_count)
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(competence_key, code, row_signature) DO UPDATE SET
+                occurrence_count = excluded.occurrence_count`,
+        args: [competenceKey, item.code, item.signature, item.count],
+      })), "immediate");
+    }
   }
 
   const previousCompetenceKey = previousMonth(competenceKey);
@@ -600,6 +668,96 @@ async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> 
     valueNature: string;
   }>(balancesResult);
   const transitions: MscExerciseSummary["transitions"] = [];
+  const executiveResult = await database.execute(
+    `SELECT usage.code, bodies.name, usage.competence_key AS competenceKey,
+            usage.occurrence_count AS occurrenceCount
+     FROM msc_power_body_usage usage
+     INNER JOIN power_bodies_2026 bodies ON bodies.code = usage.code
+     WHERE usage.competence_key LIKE ?
+       AND LOWER(bodies.name) LIKE '%poder executivo%'
+     ORDER BY usage.code, usage.competence_key`,
+    [`${year}-%`],
+  );
+  const executiveRows = resultRows<{
+    code: string;
+    name: string;
+    competenceKey: string;
+    occurrenceCount: number;
+  }>(executiveResult);
+  const executiveIndex = new Map<string, MscExerciseSummary["executivePowerBodies"][number]>();
+  executiveRows.forEach((row) => {
+    const current = executiveIndex.get(row.code) ?? {
+      code: row.code,
+      name: row.name,
+      competences: [],
+      occurrences: 0,
+    };
+    current.competences.push(row.competenceKey);
+    current.occurrences += Number(row.occurrenceCount);
+    executiveIndex.set(row.code, current);
+  });
+  const executivePowerBodies = [...executiveIndex.values()];
+  const legislativeResult = await database.execute(
+    `SELECT usage.code, bodies.name, usage.competence_key AS competenceKey,
+            usage.occurrence_count AS occurrenceCount
+     FROM msc_power_body_usage usage
+     INNER JOIN power_bodies_2026 bodies ON bodies.code = usage.code
+     WHERE usage.competence_key LIKE ?
+       AND LOWER(bodies.name) LIKE '%poder legislativo%'
+     ORDER BY usage.code, usage.competence_key`,
+    [`${year}-%`],
+  );
+  const legislativeRows = resultRows<{
+    code: string;
+    name: string;
+    competenceKey: string;
+    occurrenceCount: number;
+  }>(legislativeResult);
+  const legislativeIndex = new Map<string, MscExerciseSummary["legislativePowerBodies"][number]>();
+  legislativeRows.forEach((row) => {
+    const current = legislativeIndex.get(row.code) ?? {
+      code: row.code,
+      name: row.name,
+      competences: [],
+      occurrences: 0,
+    };
+    current.competences.push(row.competenceKey);
+    current.occurrences += Number(row.occurrenceCount);
+    legislativeIndex.set(row.code, current);
+  });
+  const legislativePowerBodies = [...legislativeIndex.values()];
+  const legislativeDataResult = await database.execute(
+    `SELECT rows.competence_key AS competenceKey, rows.code, rows.row_signature AS rowSignature,
+            rows.occurrence_count AS occurrenceCount
+     FROM msc_power_body_rows rows
+     INNER JOIN power_bodies_2026 bodies ON bodies.code = rows.code
+     WHERE rows.competence_key LIKE ?
+       AND LOWER(bodies.name) LIKE '%poder legislativo%'
+     ORDER BY rows.competence_key, rows.code, rows.row_signature`,
+    [`${year}-%`],
+  );
+  const legislativeDataRows = resultRows<{
+    competenceKey: string;
+    code: string;
+    rowSignature: string;
+    occurrenceCount: number;
+  }>(legislativeDataResult);
+  const legislativeDataByCompetence = new Map<string, typeof legislativeDataRows>();
+  legislativeDataRows.forEach((row) => {
+    const current = legislativeDataByCompetence.get(row.competenceKey) ?? [];
+    current.push(row);
+    legislativeDataByCompetence.set(row.competenceKey, current);
+  });
+  const duplicateIndex = new Map<string, { competences: string[]; rows: number }>();
+  legislativeDataByCompetence.forEach((rows, competence) => {
+    const signature = JSON.stringify(rows.map((row) => [row.code, row.rowSignature, Number(row.occurrenceCount)]));
+    const current = duplicateIndex.get(signature) ?? { competences: [], rows: 0 };
+    current.competences.push(competence);
+    current.rows = rows.reduce((total, row) => total + Number(row.occurrenceCount), 0);
+    duplicateIndex.set(signature, current);
+  });
+  const legislativeDuplicateGroups = [...duplicateIndex.values()].filter((item) => item.competences.length > 1);
+  const legislativeDataCompetences = [...legislativeDataByCompetence.keys()].sort();
 
   for (let month = 2; month <= 12; month += 1) {
     const previousCompetenceKey = `${year}-${String(month - 1).padStart(2, "0")}`;
@@ -654,7 +812,19 @@ async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> 
     });
   }
 
-  return { year, storedCompetences, transitions };
+  return {
+    year,
+    storedCompetences,
+    executivePowerBodies,
+    executiveConsistent: executivePowerBodies.length <= 1 || executivePowerBodies.every(
+      (item) => item.code === "10131" || item.code === "10132",
+    ),
+    legislativePowerBodies,
+    legislativeConsistent: legislativeDuplicateGroups.length === 0,
+    legislativeDataCompetences,
+    legislativeDuplicateGroups,
+    transitions,
+  };
 }
 
 function previousMonth(competenceKey: string) {

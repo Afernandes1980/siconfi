@@ -23,11 +23,15 @@ export async function POST(request: Request) {
     competenceLabel?: string;
     sourceFile?: string;
     rows?: MscBalanceRow[];
+    powerBodyCodes?: Array<{ code: string; count: number }>;
+    powerBodyRows?: Array<{ code: string; signature: string; count: number }>;
   };
   const competenceKey = String(body.competenceKey ?? "").trim();
   const competenceLabel = String(body.competenceLabel ?? "").trim();
   const sourceFile = String(body.sourceFile ?? "").trim();
   const rows = Array.isArray(body.rows) ? body.rows : [];
+  const powerBodyCodes = Array.isArray(body.powerBodyCodes) ? body.powerBodyCodes : [];
+  const powerBodyRows = Array.isArray(body.powerBodyRows) ? body.powerBodyRows : [];
 
   if (!/^20\d{2}-(0[1-9]|1[0-2])$/.test(competenceKey)) {
     return NextResponse.json({ error: "Competencia invalida na celula B1." }, { status: 400 });
@@ -41,6 +45,8 @@ export async function POST(request: Request) {
     competenceLabel || competenceKey,
     sourceFile,
     rows,
+    powerBodyCodes,
+    powerBodyRows,
   );
   return NextResponse.json(comparison);
 }
