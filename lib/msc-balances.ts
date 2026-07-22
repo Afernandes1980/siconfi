@@ -14,6 +14,8 @@ export type MscBalancePayload = {
   competenceKey: string;
   competenceLabel: string;
   rows: MscBalanceRow[];
+  powerBodyCodes: Array<{ code: string; count: number }>;
+  powerBodyRows: Array<{ code: string; signature: string; count: number }>;
 };
 
 export function extractMscBalances(csv: ParsedCsv): MscBalancePayload {
@@ -24,7 +26,7 @@ export function extractMscBalances(csv: ParsedCsv): MscBalancePayload {
   const natureIndex = csv.headers.length - 1;
 
   if (!competenceKey || valueIndex < 1) {
-    return { competenceKey, competenceLabel, rows: [] };
+    return { competenceKey, competenceLabel, rows: [], powerBodyCodes: [], powerBodyRows: [] };
   }
 
   const valueHeader = csv.headers[valueIndex];
@@ -50,7 +52,30 @@ export function extractMscBalances(csv: ParsedCsv): MscBalancePayload {
     });
   });
 
-  return { competenceKey, competenceLabel, rows };
+  const ic1Header = csv.headers.find((header) => normalizeHeader(header) === "ic1");
+  const type1Header = csv.headers.find((header) => normalizeHeader(header) === "tipo1");
+  const codeCounts = new Map<string, number>();
+  const powerBodyRowCounts = new Map<string, { code: string; signature: string; count: number }>();
+  if (ic1Header && type1Header) {
+    csv.rows.forEach((row) => {
+      if (String(row[type1Header] ?? "").trim().toLowerCase() !== "po") return;
+      const code = String(row[ic1Header] ?? "").replace(/\.0$/, "").replace(/\D/g, "");
+      if (!code) return;
+      codeCounts.set(code, (codeCounts.get(code) ?? 0) + 1);
+      const signature = JSON.stringify(csv.headers.map((header) => String(row[header] ?? "").trim()));
+      const key = `${code}\u0000${signature}`;
+      const current = powerBodyRowCounts.get(key);
+      powerBodyRowCounts.set(key, { code, signature, count: (current?.count ?? 0) + 1 });
+    });
+  }
+
+  return {
+    competenceKey,
+    competenceLabel,
+    rows,
+    powerBodyCodes: [...codeCounts].map(([code, count]) => ({ code, count })),
+    powerBodyRows: [...powerBodyRowCounts.values()],
+  };
 }
 
 export function normalizeCompetence(value: string) {
@@ -76,4 +101,12 @@ function parseBalance(value: string) {
     : cleaned;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeHeader(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
 }

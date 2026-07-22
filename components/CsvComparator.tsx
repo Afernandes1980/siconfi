@@ -21,6 +21,11 @@ import {
 
 const EMPTY_CSV: ParsedCsv = { headers: [], rows: [], delimiter: ";" };
 const RULES: ComparisonRuleKind[] = ["equals", "equalsIgnoreCase", "contains", "number", "date"];
+const ACCOUNT_CLASS_GROUPS = [
+  { label: "Patrimoniais", classes: ["1", "2", "3", "4"] },
+  { label: "Orçamentárias", classes: ["5", "6"] },
+  { label: "Controle", classes: ["7", "8"] },
+] as const;
 const QUANTITY_RULE_CODES = new Set(["D1_00011", "D1_00012", "D1_00013", "D1_00014"]);
 
 type StoredComparisonRule = {
@@ -93,6 +98,46 @@ type PowerBodyValidation = {
   issues: PowerBodyIssue[];
 };
 
+type RequiredPowerBodyValidation = {
+  ic1Column: string;
+  type1Column: string;
+  checked: number;
+  issues: Array<{
+    rowNumber: number;
+    reference: string;
+  }>;
+};
+
+type ResourceSource = {
+  code: string;
+  mainName: string;
+};
+
+type ResourceSourceValidation = {
+  ic2Column: string;
+  type2Column: string;
+  checked: number;
+  valid: number;
+  issues: Array<{
+    rowNumber: number;
+    reference: string;
+    code: string;
+    reason: "missing" | "invalid";
+  }>;
+};
+
+type AccountClassCoverageValidation = {
+  accountColumn: string;
+  valueColumn: string;
+  classes: Array<{
+    accountClass: string;
+    group: "Patrimonial" | "Orçamentária" | "Controle";
+    nonZeroRows: number;
+  }>;
+  missingClasses: string[];
+  passed: boolean;
+};
+
 type MscBalanceDifference = {
   comparisonKey: string;
   keyValues: string[];
@@ -108,6 +153,25 @@ type MscBalanceDifference = {
 type MscExerciseSummary = {
     year: string;
     storedCompetences: string[];
+    executivePowerBodies?: Array<{
+      code: string;
+      name: string;
+      competences: string[];
+      occurrences: number;
+    }>;
+    executiveConsistent?: boolean;
+    legislativePowerBodies?: Array<{
+      code: string;
+      name: string;
+      competences: string[];
+      occurrences: number;
+    }>;
+    legislativeConsistent?: boolean;
+    legislativeDataCompetences?: string[];
+    legislativeDuplicateGroups?: Array<{
+      competences: string[];
+      rows: number;
+    }>;
     transitions: Array<{
       previousCompetenceKey: string;
       competenceKey: string;
@@ -192,6 +256,7 @@ export default function CsvComparator({
   const [officialFiscalRules, setOfficialFiscalRules] = useState<OfficialFiscalRule[]>([]);
   const [pcaspAccounts, setPcaspAccounts] = useState<PcaspAccount[]>([]);
   const [powerBodies, setPowerBodies] = useState<PowerBody[]>([]);
+  const [resourceSources, setResourceSources] = useState<ResourceSource[]>([]);
   const [balanceComparison, setBalanceComparison] = useState<MscBalanceComparison | null>(null);
   const [balanceExercise, setBalanceExercise] = useState<MscExerciseSummary | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
@@ -247,6 +312,18 @@ export default function CsvComparator({
     () => validatePowerBodies(sourceCsv, powerBodies),
     [powerBodies, sourceCsv],
   );
+  const requiredPowerBodyValidation = useMemo(
+    () => validateRequiredPowerBodies(sourceCsv),
+    [sourceCsv],
+  );
+  const resourceSourceValidation = useMemo(
+    () => validateResourceSources(sourceCsv, resourceSources),
+    [resourceSources, sourceCsv],
+  );
+  const accountClassCoverageValidation = useMemo(
+    () => validateAccountClassCoverage(sourceCsv),
+    [sourceCsv],
+  );
   const fiscalValidation = useMemo(
     () => validateFiscalFile(targetCsv, targetName),
     [targetCsv, targetName],
@@ -299,6 +376,23 @@ export default function CsvComparator({
       })
       .finally(() => {
         if (active) setRulesLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/resource-sources", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data: { resourceSources: ResourceSource[] }) => {
+        if (active) setResourceSources(data.resourceSources ?? []);
+      })
+      .catch(() => {
+        if (active) setResourceSources([]);
       });
 
     return () => {
@@ -643,6 +737,71 @@ export default function CsvComparator({
           <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
         </a>
 
+        <a
+          href="#validacao-d1-00022"
+          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Preenchimento obrigatorio da MSC
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00022 — TIPO1 PO exige IC1</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
+        <a
+          href="#validacao-d1-00023"
+          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Consistencia anual da MSC
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00023 — Poder Executivo entre competencias</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
+        <a
+          href="#validacao-d1-00024"
+          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Consistencia anual da MSC
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00024 — dados legislativos iguais entre meses</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
+        <a
+          href="#validacao-d1-00027"
+          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Fonte de recursos da MSC
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00027 — TIPO2 FR exige fonte válida em IC2</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
+        <a
+          href="#validacao-d1-00028"
+          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+        >
+          <span>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
+              Cobertura das classes contábeis
+            </span>
+            <span className="mt-1 block font-semibold">Ver resultado da regra D1_00028 — valores diferentes de zero nas classes 1 a 8</span>
+          </span>
+          <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
+        </a>
+
         <FiscalRulesPanel
           validation={fiscalValidation}
           documents={officialFiscalDocuments}
@@ -699,6 +858,361 @@ export default function CsvComparator({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        <section id="validacao-d1-00022" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00022</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Poder e Orgao obrigatorio</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Verifica se todas as linhas com TIPO1 igual a PO possuem o codigo do Poder e Orgao preenchido em IC1.
+              </p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-right">
+              <p className="text-xs font-semibold uppercase text-rose-700">IC1 nao informado</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-950">{requiredPowerBodyValidation.issues.length}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <DataPoint label="Linhas TIPO1 = PO" value={requiredPowerBodyValidation.checked} />
+            <DataPoint label="Linhas preenchidas" value={requiredPowerBodyValidation.checked - requiredPowerBodyValidation.issues.length} />
+            <DataPoint label="Linhas sem IC1" value={requiredPowerBodyValidation.issues.length} />
+          </div>
+
+          {sourceCsv.rows.length > 0 && (!requiredPowerBodyValidation.ic1Column || !requiredPowerBodyValidation.type1Column) && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Nao foi possivel identificar as colunas IC1 e TIPO1 na MSC. A regra D1_00022 nao pode ser conferida.
+            </div>
+          )}
+
+          {requiredPowerBodyValidation.ic1Column && requiredPowerBodyValidation.type1Column && requiredPowerBodyValidation.issues.length === 0 && sourceCsv.rows.length > 0 && (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              Todas as linhas com TIPO1 igual a PO possuem Poder e Orgao informado em IC1.
+            </div>
+          )}
+
+          {requiredPowerBodyValidation.issues.length > 0 && (
+            <div className="mt-4 max-h-72 overflow-y-auto rounded-lg border border-rose-200">
+              <table className="w-full table-fixed text-left text-sm">
+                <thead className="sticky top-0 bg-rose-50 text-xs uppercase text-rose-700">
+                  <tr>
+                    <th className="w-28 px-4 py-3">Linha</th>
+                    <th className="px-4 py-3">Conta ou referencia</th>
+                    <th className="w-32 px-4 py-3">TIPO1</th>
+                    <th className="w-32 px-4 py-3">IC1</th>
+                    <th className="w-40 px-4 py-3">Regra</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rose-100">
+                  {requiredPowerBodyValidation.issues.map((issue) => (
+                    <tr key={`${issue.rowNumber}-${issue.reference}`} className="bg-rose-50/40 text-rose-900">
+                      <td className="px-4 py-3 font-semibold">{issue.rowNumber}</td>
+                      <td className="break-words px-4 py-3 font-semibold">{issue.reference || "-"}</td>
+                      <td className="px-4 py-3 font-bold">PO</td>
+                      <td className="px-4 py-3 font-bold">Nao informado</td>
+                      <td className="px-4 py-3 font-semibold">D1_00022</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section id="validacao-d1-00023" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00023</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Poder Executivo entre competencias</h2>
+              <p className="mt-1 max-w-4xl text-sm text-slate-500">
+                Confere em todas as MSC armazenadas do exercicio se foi utilizado mais de um codigo classificado como Poder Executivo na tabela power_bodies_2026.
+              </p>
+            </div>
+            <div className={`rounded-lg border px-4 py-3 text-right ${
+              balanceExercise && !isExecutivePowerConsistent(balanceExercise)
+                ? "border-rose-200 bg-rose-50 text-rose-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}>
+              <p className="text-xs font-semibold uppercase opacity-70">Codigos executivos</p>
+              <p className="mt-1 text-2xl font-semibold">{balanceExercise?.executivePowerBodies?.length ?? 0}</p>
+            </div>
+          </div>
+
+          {!balanceExercise && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Importe as MSC do exercicio para iniciar a verificacao D1_00023.
+            </div>
+          )}
+
+          {balanceExercise && (balanceExercise.executivePowerBodies?.length ?? 0) === 0 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Nenhum codigo com descricao de Poder Executivo foi encontrado nas competencias armazenadas. Reimporte as MSC para registrar os codigos de IC1.
+            </div>
+          )}
+
+          {balanceExercise && (balanceExercise.executivePowerBodies?.length ?? 0) > 0 && isExecutivePowerConsistent(balanceExercise) && (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              Os codigos de Poder Executivo utilizados nas competencias do exercicio {balanceExercise.year} sao consistentes. A combinacao municipal 10131 (Prefeitura e Fundos) com 10132 (RPPS) e permitida.
+            </div>
+          )}
+
+          {balanceExercise && !isExecutivePowerConsistent(balanceExercise) && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+              Possivel inconsistencia: foram encontrados codigos diferentes de Poder Executivo no mesmo exercicio.
+            </div>
+          )}
+
+          {(balanceExercise?.executivePowerBodies?.length ?? 0) > 0 && (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="w-32 px-4 py-3">Codigo</th>
+                    <th className="px-4 py-3">Poder Executivo</th>
+                    <th className="px-4 py-3">Competencias</th>
+                    <th className="w-28 px-4 py-3">Ocorrencias</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {balanceExercise?.executivePowerBodies?.map((item) => (
+                    <tr key={item.code} className={!isExecutivePowerConsistent(balanceExercise) ? "bg-rose-50/40 text-rose-900" : "text-slate-700"}>
+                      <td className="px-4 py-3 font-bold">{item.code}</td>
+                      <td className="break-words px-4 py-3 font-semibold">{item.name}</td>
+                      <td className="break-words px-4 py-3">{item.competences.join(" · ")}</td>
+                      <td className="px-4 py-3 font-semibold">{item.occurrences}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section id="validacao-d1-00024" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00024</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Dados do Legislativo repetidos entre competências</h2>
+              <p className="mt-1 max-w-4xl text-sm text-slate-500">
+                Compara todas as linhas classificadas como Poder Legislativo e sinaliza competências diferentes que possuem exatamente o mesmo conjunto de dados.
+              </p>
+            </div>
+            <div className={`rounded-lg border px-4 py-3 text-right ${
+              balanceExercise && !isLegislativePowerConsistent(balanceExercise)
+                ? "border-rose-200 bg-rose-50 text-rose-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}>
+              <p className="text-xs font-semibold uppercase opacity-70">Grupos repetidos</p>
+              <p className="mt-1 text-2xl font-semibold">{balanceExercise?.legislativeDuplicateGroups?.length ?? 0}</p>
+            </div>
+          </div>
+
+          {!balanceExercise && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Importe as MSC do exercicio para iniciar a verificacao D1_00024.
+            </div>
+          )}
+
+          {balanceExercise && !hasLegislativeData(balanceExercise) && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Nenhum dado classificado como Poder Legislativo foi encontrado. As MSC importadas antes desta atualização precisam ser reimportadas para a comparação.
+            </div>
+          )}
+
+          {balanceExercise && hasLegislativeData(balanceExercise) && isLegislativePowerConsistent(balanceExercise) && (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              Não foram encontrados dados do Legislativo exatamente iguais entre competências diferentes do exercício {balanceExercise.year}.
+            </div>
+          )}
+
+          {balanceExercise && !isLegislativePowerConsistent(balanceExercise) && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+              Possível inconsistência: os mesmos dados do Legislativo foram enviados em competências diferentes.
+            </div>
+          )}
+
+          {(balanceExercise?.legislativeDuplicateGroups?.length ?? 0) > 0 && (
+            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[620px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Competências com dados iguais</th>
+                    <th className="w-40 px-4 py-3">Linhas comparadas</th>
+                    <th className="w-40 px-4 py-3">Regra</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {balanceExercise?.legislativeDuplicateGroups?.map((item) => (
+                    <tr key={item.competences.join("-")} className="bg-rose-50/40 text-rose-900">
+                      <td className="break-words px-4 py-3 font-bold">{item.competences.join(" · ")}</td>
+                      <td className="px-4 py-3 font-semibold">{item.rows}</td>
+                      <td className="px-4 py-3 font-semibold">D1_00024</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section id="validacao-d1-00027" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00027</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Fonte de Recursos obrigatória e válida</h2>
+              <p className="mt-1 max-w-4xl text-sm text-slate-500">
+                Nas linhas em que TIPO2 é FR, exige o preenchimento de IC2 e valida o código na tabela resource_sources_2026.
+              </p>
+            </div>
+            <div className={`rounded-lg border px-4 py-3 text-right ${
+              resourceSourceValidation.issues.length > 0
+                ? "border-rose-200 bg-rose-50 text-rose-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}>
+              <p className="text-xs font-semibold uppercase opacity-70">Inconsistências</p>
+              <p className="mt-1 text-2xl font-semibold">{resourceSourceValidation.issues.length}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <DataPoint label="Linhas TIPO2 = FR" value={resourceSourceValidation.checked} />
+            <DataPoint label="Fontes válidas" value={resourceSourceValidation.valid} />
+            <DataPoint label="Fontes ausentes" value={resourceSourceValidation.issues.filter((item) => item.reason === "missing").length} />
+            <DataPoint label="Fontes inválidas" value={resourceSourceValidation.issues.filter((item) => item.reason === "invalid").length} />
+          </div>
+
+          {sourceCsv.rows.length > 0 && (!resourceSourceValidation.ic2Column || !resourceSourceValidation.type2Column) && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Não foi possível identificar as colunas TIPO2 e IC2. A regra D1_00027 não pode ser conferida.
+            </div>
+          )}
+
+          {resourceSources.length === 0 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              A tabela de Fontes de Recursos 2026 não está disponível para validação.
+            </div>
+          )}
+
+          {sourceCsv.rows.length > 0 && resourceSources.length > 0 && resourceSourceValidation.ic2Column && resourceSourceValidation.type2Column && resourceSourceValidation.issues.length === 0 && (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              Todas as linhas com TIPO2 igual a FR possuem uma Fonte de Recursos válida em IC2.
+            </div>
+          )}
+
+          {resourceSourceValidation.issues.length > 0 && (
+            <div className="mt-4 max-h-80 overflow-y-auto rounded-lg border border-rose-200">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="sticky top-0 bg-rose-50 text-xs uppercase text-rose-700">
+                  <tr>
+                    <th className="w-24 px-4 py-3">Linha</th>
+                    <th className="px-4 py-3">Conta ou referência</th>
+                    <th className="w-36 px-4 py-3">IC2</th>
+                    <th className="w-48 px-4 py-3">Ocorrência</th>
+                    <th className="w-32 px-4 py-3">Regra</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rose-100">
+                  {resourceSourceValidation.issues.map((issue) => (
+                    <tr key={`${issue.rowNumber}-${issue.code}-${issue.reason}`} className="bg-rose-50/40 text-rose-900">
+                      <td className="px-4 py-3 font-semibold">{issue.rowNumber}</td>
+                      <td className="break-words px-4 py-3 font-semibold">{issue.reference || "-"}</td>
+                      <td className="px-4 py-3 font-bold">{issue.code || "Não informado"}</td>
+                      <td className="px-4 py-3 font-semibold">{issue.reason === "missing" ? "Fonte ausente" : "Fonte inválida"}</td>
+                      <td className="px-4 py-3 font-semibold">D1_00027</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section id="validacao-d1-00028" className="panel mt-5 scroll-mt-5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00028</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">Valores em todas as classes da MSC</h2>
+              <p className="mt-1 max-w-4xl text-sm text-slate-500">
+                Verifica se existem valores diferentes de zero nas classes patrimoniais (1 a 4), orçamentárias (5 e 6) e de controle (7 e 8).
+              </p>
+            </div>
+            <div className={`rounded-lg border px-4 py-3 text-right ${
+              accountClassCoverageValidation.passed
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-rose-200 bg-rose-50 text-rose-900"
+            }`}>
+              <p className="text-xs font-semibold uppercase opacity-70">Pontuação desta MSC</p>
+              <p className="mt-1 text-2xl font-semibold">{accountClassCoverageValidation.passed ? "1/13" : "0/13"}</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 lg:grid-cols-3">
+            {ACCOUNT_CLASS_GROUPS.map((group) => {
+              const groupClasses = accountClassCoverageValidation.classes.filter((item) =>
+                (group.classes as readonly string[]).includes(item.accountClass),
+              );
+              const missing = groupClasses.filter((item) => item.nonZeroRows === 0);
+              const nonZeroRows = groupClasses.reduce((total, item) => total + item.nonZeroRows, 0);
+
+              return (
+                <div
+                  key={group.label}
+                  className={`rounded-lg border px-4 py-4 ${
+                    missing.length === 0
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-rose-200 bg-rose-50 text-rose-900"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase opacity-70">Classes {group.classes.join(", ")}</p>
+                      <p className="mt-1 text-lg font-semibold">{group.label}</p>
+                    </div>
+                    <p className="text-2xl font-semibold">{nonZeroRows}</p>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {groupClasses.map((item) => (
+                      <span
+                        key={item.accountClass}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                          item.nonZeroRows > 0
+                            ? "border-emerald-300 bg-white text-emerald-800"
+                            : "border-rose-300 bg-white text-rose-800"
+                        }`}
+                      >
+                        Classe {item.accountClass}: {item.nonZeroRows}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs font-medium opacity-80">
+                    {missing.length === 0
+                      ? "Todas as classes do grupo possuem valores diferentes de zero."
+                      : `Classes ausentes: ${missing.map((item) => item.accountClass).join(", ")}.`}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+
+          {sourceCsv.rows.length > 0 && (!accountClassCoverageValidation.accountColumn || !accountClassCoverageValidation.valueColumn) && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              Não foi possível identificar as colunas de conta e valor. A regra D1_00028 não pode ser conferida.
+            </div>
+          )}
+
+          {sourceCsv.rows.length > 0 && accountClassCoverageValidation.accountColumn && accountClassCoverageValidation.valueColumn && accountClassCoverageValidation.passed && (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+              A MSC possui valores diferentes de zero em todas as classes de contas e alcançou 1/13 da pontuação da regra.
+            </div>
+          )}
+
+          {sourceCsv.rows.length > 0 && accountClassCoverageValidation.accountColumn && accountClassCoverageValidation.valueColumn && !accountClassCoverageValidation.passed && (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+              A MSC não possui valores diferentes de zero nas classes: {accountClassCoverageValidation.missingClasses.join(", ") || "1 a 8"}.
             </div>
           )}
         </section>
@@ -1555,6 +2069,22 @@ function MunicipalityCodeField({ value, onChange, onSelect }: { value: string; o
   </div>;
 }
 
+function isExecutivePowerConsistent(exercise: MscExerciseSummary) {
+  if (typeof exercise.executiveConsistent === "boolean") return exercise.executiveConsistent;
+  const codes = exercise.executivePowerBodies?.map((item) => item.code) ?? [];
+  return codes.length <= 1 || codes.every((code) => code === "10131" || code === "10132");
+}
+
+function isLegislativePowerConsistent(exercise: MscExerciseSummary) {
+  if (typeof exercise.legislativeConsistent === "boolean") return exercise.legislativeConsistent;
+  return (exercise.legislativeDuplicateGroups?.length ?? 0) === 0;
+}
+
+function hasLegislativeData(exercise: MscExerciseSummary) {
+  if (exercise.legislativeDataCompetences) return exercise.legislativeDataCompetences.length > 0;
+  return (exercise.legislativePowerBodies?.length ?? 0) > 0;
+}
+
 function RuleChecksDialog({
   rule,
   periodicityKey,
@@ -1788,8 +2318,115 @@ function validatePowerBodies(csv: ParsedCsv, powerBodies: PowerBody[]): PowerBod
   return { column, checked, valid, issues };
 }
 
+function validateRequiredPowerBodies(csv: ParsedCsv): RequiredPowerBodyValidation {
+  const ic1Column = csv.headers.find((header) => normalizeHeaderKey(header) === "ic1") ?? "";
+  const type1Column = csv.headers.find((header) => normalizeHeaderKey(header) === "tipo1") ?? "";
+  const referenceColumn = findColumnByHeader(csv.headers, ["conta"], 0);
+
+  if (!ic1Column || !type1Column) {
+    return { ic1Column, type1Column, checked: 0, issues: [] };
+  }
+
+  const issues: RequiredPowerBodyValidation["issues"] = [];
+  let checked = 0;
+
+  csv.rows.forEach((row, index) => {
+    if (normalizeSearch(row[type1Column] ?? "") !== "po") return;
+    checked += 1;
+    if (String(row[ic1Column] ?? "").trim()) return;
+
+    issues.push({
+      rowNumber: Number(row.__rowNumber) || index + 3,
+      reference: String(row[referenceColumn] ?? "").trim(),
+    });
+  });
+
+  return { ic1Column, type1Column, checked, issues };
+}
+
+function validateResourceSources(csv: ParsedCsv, resourceSources: ResourceSource[]): ResourceSourceValidation {
+  const ic2Column = csv.headers.find((header) => normalizeHeaderKey(header) === "ic2") ?? "";
+  const type2Column = csv.headers.find((header) => normalizeHeaderKey(header) === "tipo2") ?? "";
+  const referenceColumn = findColumnByHeader(csv.headers, ["conta"], 0);
+  const emptyResult: ResourceSourceValidation = {
+    ic2Column,
+    type2Column,
+    checked: 0,
+    valid: 0,
+    issues: [],
+  };
+
+  if (!ic2Column || !type2Column) return emptyResult;
+
+  const officialCodes = new Set(resourceSources.map((item) => normalizeResourceSourceCode(item.code)).filter(Boolean));
+  const issues: ResourceSourceValidation["issues"] = [];
+  let checked = 0;
+  let valid = 0;
+
+  csv.rows.forEach((row, index) => {
+    if (normalizeSearch(row[type2Column] ?? "") !== "fr") return;
+    checked += 1;
+    const rawCode = String(row[ic2Column] ?? "").trim();
+    const code = normalizeResourceSourceCode(rawCode);
+    const issueBase = {
+      rowNumber: Number(row.__rowNumber) || index + 3,
+      reference: String(row[referenceColumn] ?? "").trim(),
+      code: rawCode,
+    };
+
+    if (!code) {
+      issues.push({ ...issueBase, reason: "missing" });
+    } else if (officialCodes.size > 0 && !officialCodes.has(code)) {
+      issues.push({ ...issueBase, reason: "invalid" });
+    } else if (officialCodes.has(code)) {
+      valid += 1;
+    }
+  });
+
+  return { ic2Column, type2Column, checked, valid, issues };
+}
+
+function normalizeResourceSourceCode(value: string) {
+  return value.trim().replace(/\.0$/, "").replace(/\D/g, "");
+}
+
 function normalizePowerBodyCode(value: string) {
   return value.trim().replace(/\.0$/, "").replace(/\D/g, "");
+}
+
+function validateAccountClassCoverage(csv: ParsedCsv): AccountClassCoverageValidation {
+  const accountColumn = findColumnByHeader(csv.headers, ["conta"], 0);
+  const valueColumn = findColumnByHeader(csv.headers, ["valor"], 13);
+  const counts = new Map(Array.from({ length: 8 }, (_, index) => [String(index + 1), 0]));
+
+  if (accountColumn && valueColumn) {
+    csv.rows.forEach((row) => {
+      const account = String(row[accountColumn] ?? "").replace(/\D/g, "");
+      const accountClass = account[0] ?? "";
+      const value = parseFiscalNumber(String(row[valueColumn] ?? ""));
+      if (!counts.has(accountClass) || value === null || value === 0) return;
+      counts.set(accountClass, (counts.get(accountClass) ?? 0) + 1);
+    });
+  }
+
+  const classes: AccountClassCoverageValidation["classes"] = [...counts].map(([accountClass, nonZeroRows]) => ({
+    accountClass,
+    group: Number(accountClass) <= 4
+      ? "Patrimonial"
+      : Number(accountClass) <= 6
+        ? "Orçamentária"
+        : "Controle",
+    nonZeroRows,
+  }));
+  const missingClasses = classes.filter((item) => item.nonZeroRows === 0).map((item) => item.accountClass);
+
+  return {
+    accountColumn,
+    valueColumn,
+    classes,
+    missingClasses,
+    passed: Boolean(accountColumn && valueColumn) && missingClasses.length === 0,
+  };
 }
 
 function formatBalance(value: number | null, nature: string) {

@@ -85,6 +85,24 @@ export const DATABASE_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_power_bodies_2026_name
     ON power_bodies_2026 (name);
 
+  CREATE TABLE IF NOT EXISTS resource_sources_2026 (
+    code TEXT PRIMARY KEY,
+    initial_code TEXT NOT NULL,
+    initial_name TEXT NOT NULL,
+    main_code TEXT NOT NULL,
+    main_name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_resource_sources_2026_main_code
+    ON resource_sources_2026 (main_code);
+
+  CREATE INDEX IF NOT EXISTS idx_resource_sources_2026_category
+    ON resource_sources_2026 (category);
+
   CREATE TABLE IF NOT EXISTS msc_balance_imports (
     competence_key TEXT PRIMARY KEY,
     competence_label TEXT NOT NULL,
@@ -107,6 +125,29 @@ export const DATABASE_SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_msc_balance_rows_comparison
     ON msc_balance_rows (comparison_key, competence_key, value_type);
+
+  CREATE TABLE IF NOT EXISTS msc_power_body_usage (
+    competence_key TEXT NOT NULL,
+    code TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (competence_key, code),
+    FOREIGN KEY (competence_key) REFERENCES msc_balance_imports(competence_key) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_msc_power_body_usage_code
+    ON msc_power_body_usage (code, competence_key);
+
+  CREATE TABLE IF NOT EXISTS msc_power_body_rows (
+    competence_key TEXT NOT NULL,
+    code TEXT NOT NULL,
+    row_signature TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (competence_key, code, row_signature),
+    FOREIGN KEY (competence_key) REFERENCES msc_balance_imports(competence_key) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_msc_power_body_rows_competence
+    ON msc_power_body_rows (competence_key, code);
 
   CREATE TABLE IF NOT EXISTS pcasp_extended_2026 (
     account TEXT PRIMARY KEY,

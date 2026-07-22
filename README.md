@@ -197,6 +197,7 @@ scripts/
   migrate-db.mjs               Migração explícita do banco Turso
   migrate-local-sqlite.mjs     Carga única do antigo SQLite local
   import-msc-layout.mjs        Importação do leiaute MSC e PCASP
+  import-resource-sources.mjs  Importação das fontes de recursos de 2026
   turso-client.mjs             Cliente Turso utilizado pelos scripts
 ```
 
@@ -206,9 +207,20 @@ scripts/
 - `GET /api/account-natures`: natureza padrão por classe contábil.
 - `GET /api/pcasp-accounts`: contas do PCASP Estendido 2026.
 - `GET /api/power-bodies`: códigos oficiais de Poder e Órgão da aba `PO`.
+- `GET /api/resource-sources`: códigos válidos de Fonte de Recursos de 2026.
 - `GET /api/msc-balances`: consulta o histórico do exercício mais recente (`D1_00020`).
 - `POST /api/msc-balances`: grava os saldos da MSC e compara competências consecutivas (`D1_00020`).
 
 Na regra `D1_00020`, cada competência permanece armazenada separadamente, permitindo manter os doze meses do exercício. Depois de cada importação, todas as transições mensais disponíveis no exercício são recalculadas. Saldos iniciais (`beginning_balance`) iguais a zero são desconsiderados na comparação com o saldo final do mês anterior.
+
+Na regra `D1_00022`, toda linha da MSC com `TIPO1` igual a `PO` deve possuir o código de Poder e Órgão preenchido em `IC1`.
+
+Na regra `D1_00023`, os códigos `IC1` usados como `PO` são armazenados por competência. O sistema cruza os códigos com `power_bodies_2026` e aponta quando códigos incompatíveis cuja descrição contenha `Poder Executivo` aparecem no mesmo exercício. A combinação `10131` (Prefeitura e Fundos) com `10132` (RPPS municipal) é permitida.
+
+Na regra `D1_00024`, as linhas classificadas como `Poder Legislativo` são armazenadas por competência. O sistema compara o conjunto completo dessas linhas e sinaliza quando competências diferentes do mesmo exercício possuem dados legislativos exatamente iguais.
+
+Na regra `D1_00027`, toda linha da MSC cujo `TIPO2` seja `FR` deve possuir uma Fonte de Recursos preenchida em `IC2`. O código é conferido na tabela `resource_sources_2026`, formada pela combinação do código inicial de um dígito com o código principal de três dígitos.
+
+Na regra `D1_00028`, cada MSC deve apresentar pelo menos um valor diferente de zero em todas as classes de contas: patrimoniais (1, 2, 3 e 4), orçamentárias (5 e 6) e de controle (7 e 8). A MSC aprovada representa `1/13` da pontuação da regra.
 
 As APIs usam o runtime Node.js e acessam o Turso pelas credenciais privadas do ambiente.
