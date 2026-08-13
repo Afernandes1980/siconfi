@@ -27,6 +27,21 @@ const ACCOUNT_CLASS_GROUPS = [
   { label: "Controle", classes: ["7", "8"] },
 ] as const;
 const QUANTITY_RULE_CODES = new Set(["D1_00011", "D1_00012", "D1_00013", "D1_00014"]);
+const DIMENSION_MENUS = [
+  { dimension: 1, label: "Dimensão I", total: 44 },
+  { dimension: 2, label: "Dimensão II", total: 106 },
+  { dimension: 3, label: "Dimensão III", total: 55 },
+  { dimension: 4, label: "Dimensão IV", total: 47 },
+] as const;
+const IMPLEMENTED_RULE_AREAS: Record<string, string> = {
+  D1_00019: "validacao-d1-00019",
+  D1_00020: "validacao-d1-00020",
+  D1_00022: "validacao-d1-00022",
+  D1_00023: "validacao-d1-00023",
+  D1_00024: "validacao-d1-00024",
+  D1_00027: "validacao-d1-00027",
+  D1_00028: "validacao-d1-00028",
+};
 
 type StoredComparisonRule = {
   id: number;
@@ -221,6 +236,7 @@ type AccountNatureValidation = {
 };
 
 type AccountNatureFilter = "todas" | "corretas" | "invertidas";
+type DimensionItemStatus = "total" | "partial" | "pending" | "not_applicable";
 type AppUser = { id: number; cpf: string; email: string; displayName: string; role: string; active: number; createdAt: string };
 type Organization = { id: number; code: string; name: string; document: string; organizationType: string; state: string; municipality: string; email: string; environment: "demonstration" | "production"; active: number };
 
@@ -262,6 +278,9 @@ export default function CsvComparator({
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState("");
   const [activeRegistration, setActiveRegistration] = useState<"users" | "organizations" | null>(null);
+  const [activeArea, setActiveArea] = useState<string | null>(null);
+  const [openDimensions, setOpenDimensions] = useState<number[]>([]);
+  const [ruleNames, setRuleNames] = useState<Record<string, string>>({});
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -276,6 +295,17 @@ export default function CsvComparator({
 
   const summary = useMemo(() => summarizeResults(results), [results]);
   const previewResults = results.slice(0, 60);
+  const selectedPendingRule = activeArea?.startsWith("regra-") ? activeArea.slice(6) : null;
+
+  useEffect(() => {
+    fetch("/rule-names.txt")
+      .then((response) => response.ok ? response.text() : "")
+      .then((text) => {
+        const names = Object.fromEntries(text.split(/\r?\n/).map((line) => line.split(/\t+/, 2)).filter(([code, name]) => code && name));
+        setRuleNames(names);
+      })
+      .catch(() => setRuleNames({}));
+  }, []);
   const ruleDimensions = useMemo(
     () => [...new Set(rulesSummary.map((item) => item.dimension))],
     [rulesSummary],
@@ -632,7 +662,51 @@ export default function CsvComparator({
 
   return (
     <main className="app-background">
-      <section className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-[1920px] flex-col lg:min-h-screen lg:flex-row">
+        <aside className="border-b border-slate-950/70 bg-gradient-to-b from-cyan-900 via-blue-950 to-slate-950 text-white shadow-xl shadow-blue-950/30 lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0">
+          <div className="flex h-full flex-col p-4 lg:p-6">
+            <div className="flex items-center justify-between gap-4 lg:block">
+              <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-100">Siconfi</p><p className="mt-1 text-lg font-semibold">Ranking Municipal</p></div>
+              <div className="text-right lg:mt-6 lg:text-left"><p className="text-sm font-semibold">{currentUser.displayName}</p><p className="text-xs text-blue-100/80">{currentUser.organizationName}</p></div>
+            </div>
+            <nav aria-label="Menu principal" className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:mt-8 lg:flex-col lg:overflow-y-auto">
+              <button type="button" onClick={() => setActiveArea((current) => current === "arquivos" ? null : "arquivos")} className={`sidebar-link text-left ${activeArea === "arquivos" ? "bg-white/20 text-white shadow-sm ring-1 ring-white/25" : ""}`} aria-expanded={activeArea === "arquivos"}>Área de importação</button>
+              {DIMENSION_MENUS.map(({ dimension, label, total }) => {
+                const isOpen = openDimensions.includes(dimension);
+                const isActive = activeArea === `dashboard-dimension-${dimension}`;
+                return (
+                  <div key={dimension} className="shrink-0">
+                    <button type="button" className={`sidebar-dimension ${isActive ? "bg-white/20 ring-1 ring-white/25" : ""}`} onClick={() => { setActiveArea(`dashboard-dimension-${dimension}`); setOpenDimensions((current) => current.includes(dimension) ? current.filter((item) => item !== dimension) : [...current, dimension]); }} aria-expanded={isOpen} aria-current={isActive ? "page" : undefined}>
+                      <span>{label}</span><span className="text-xs text-blue-100/75">{total} {isOpen ? "▴" : "▾"}</span>
+                    </button>
+                    {isOpen && (
+                      <div className="mt-1 grid max-h-72 gap-1 overflow-y-auto border-l border-white/20 pl-2">
+                        {Array.from({ length: total }, (_, index) => `D${dimension}_${String(index + 1).padStart(5, "0")}`).map((code) => {
+                          const area = IMPLEMENTED_RULE_AREAS[code] ?? `regra-${code}`;
+                          return (
+                            <button key={code} type="button" onClick={() => setActiveArea((current) => current === area ? null : area)} className={`sidebar-submenu group relative ${activeArea === area ? "bg-white/20 text-white" : ""}`} aria-expanded={activeArea === area} aria-label={`${code}: ${ruleNames[code] ?? "Descrição ainda não informada"}`}>
+                              {code}
+                              <span role="tooltip" className="pointer-events-none fixed left-[17.5rem] z-50 hidden w-80 -translate-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs font-normal leading-relaxed text-slate-700 shadow-2xl group-hover:block group-focus-visible:block">
+                                <strong className="mb-1 block text-slate-950">{code}</strong>
+                                {ruleNames[code] ?? "Descrição ainda não informada"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </nav>
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-white/20 pt-4 lg:mt-auto lg:flex-col">
+              {currentUser.role === "admin" && <><button type="button" className="sidebar-action" onClick={() => openRegistration("users")}>Cadastro de usuários</button><button type="button" className="sidebar-action" onClick={() => openRegistration("organizations")}>Cadastro de empresas</button></>}
+              <button type="button" className="sidebar-action" onClick={() => window.location.assign("/empresas")}>Trocar empresa</button>
+              <button type="button" className="sidebar-action text-rose-200" onClick={handleLogout}>Sair</button>
+            </div>
+          </div>
+        </aside>
+      <section className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
           <div>
             <p className="text-xs font-semibold uppercase text-cyan-700">Siconfi</p>
@@ -645,7 +719,7 @@ export default function CsvComparator({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-3">
+          <div className="hidden">
             <div className="text-right">
               <p className="text-sm font-semibold text-slate-800">{currentUser.displayName}</p>
               <p className="text-xs text-slate-500">{currentUser.organizationName}</p>
@@ -684,7 +758,40 @@ export default function CsvComparator({
           <OrganizationsDialog organizations={organizations} error={usersError} onClose={() => setActiveRegistration(null)} onSave={saveOrganization} />
         )}
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        {activeArea === null && (
+          <div className="flex min-h-[calc(100vh-180px)] items-center justify-center px-6 py-16" aria-hidden="true">
+            <img
+              src="/fortec-watermark.png"
+              alt=""
+              className="h-auto w-full max-w-[460px] select-none object-contain opacity-20"
+              draggable={false}
+            />
+          </div>
+        )}
+
+        {DIMENSION_MENUS.map(({ dimension, label }) => activeArea === `dashboard-dimension-${dimension}` && (
+          <DimensionDashboard
+            key={dimension}
+            dimension={dimension}
+            label={label}
+            rules={storedRules.filter((rule) => rule.code.startsWith(`D${dimension}_`))}
+            checksByRule={checksByRule}
+            periodicityByRule={periodicityByRule}
+            loading={rulesLoading}
+            automaticRuleCompleted={dimension === 1 && sourceCsv.rows.length > 0 && pcaspAccounts.length > 0 && accountNatureValidation.checked > 0 && accountNatureValidation.inverted === 0 && accountNatureValidation.withoutNature === 0}
+            onSelectRule={(code) => setActiveArea(IMPLEMENTED_RULE_AREAS[code] ?? `regra-${code}`)}
+          />
+        ))}
+
+        {selectedPendingRule && (
+          <section className="panel mt-6 p-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Regra do Ranking Municipal</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950">{selectedPendingRule}</h2>
+            <p className="mt-3 text-sm text-slate-600">Área individual reservada para a implementação e apresentação desta regra.</p>
+          </section>
+        )}
+
+        <div id="arquivos" className={`${activeArea === "arquivos" ? "grid" : "hidden"} mt-6 scroll-mt-5 gap-4 xl:grid-cols-2`}>
           <FilePanel
             title="MATRIZ"
             fileKind="csv"
@@ -705,7 +812,7 @@ export default function CsvComparator({
           />
         </div>
 
-        {fileError && (
+        {activeArea === "arquivos" && fileError && (
           <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
             {fileError}
           </div>
@@ -713,7 +820,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00019"
-          className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-pink-50 px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-100"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -726,7 +833,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00020"
-          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -739,7 +846,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00022"
-          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -752,7 +859,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00023"
-          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -765,7 +872,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00024"
-          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -778,7 +885,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00027"
-          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -791,7 +898,7 @@ export default function CsvComparator({
 
         <a
           href="#validacao-d1-00028"
-          className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-pink-200 bg-white px-5 py-4 text-pink-900 shadow-sm transition hover:border-pink-400 hover:bg-pink-50"
+          className="hidden"
         >
           <span>
             <span className="block text-xs font-semibold uppercase tracking-wide text-pink-700">
@@ -802,14 +909,14 @@ export default function CsvComparator({
           <span className="shrink-0 text-2xl" aria-hidden="true">↓</span>
         </a>
 
-        <FiscalRulesPanel
+        <div className={activeArea === "regras-fiscais" ? "block" : "hidden"}><FiscalRulesPanel
           validation={fiscalValidation}
           documents={officialFiscalDocuments}
           rules={officialFiscalRules}
           hasFiscalFile={targetCsv.rows.length > 0 || targetCsv.headers.length > 0}
-        />
+        /></div>
 
-        <section id="validacao-d1-00019" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00019" className={`${activeArea === "validacao-d1-00019" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00019</p>
@@ -862,7 +969,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section id="validacao-d1-00022" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00022" className={`${activeArea === "validacao-d1-00022" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00022</p>
@@ -923,7 +1030,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section id="validacao-d1-00023" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00023" className={`${activeArea === "validacao-d1-00023" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00023</p>
@@ -992,7 +1099,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section id="validacao-d1-00024" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00024" className={`${activeArea === "validacao-d1-00024" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00024</p>
@@ -1059,7 +1166,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section id="validacao-d1-00027" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00027" className={`${activeArea === "validacao-d1-00027" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00027</p>
@@ -1131,7 +1238,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section id="validacao-d1-00028" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00028" className={`${activeArea === "validacao-d1-00028" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00028</p>
@@ -1217,7 +1324,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section id="validacao-d1-00020" className="panel mt-5 scroll-mt-5 p-5">
+        <section id="validacao-d1-00020" className={`${activeArea === "validacao-d1-00020" ? "block" : "hidden"} panel mt-5 scroll-mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase text-pink-700">D1 · D1_00020</p>
@@ -1352,7 +1459,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section className="panel mt-5 p-5">
+        <section className={`${activeArea === "natureza-contas" ? "block" : "hidden"} panel mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Natureza das contas contabeis</h2>
@@ -1495,7 +1602,7 @@ export default function CsvComparator({
           )}
         </section>
 
-        <section className="panel mt-5 p-5">
+        <section className={`${activeArea === "regras-salvas" ? "block" : "hidden"} panel mt-5 p-5`}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Regras salvas no banco</h2>
@@ -1708,7 +1815,7 @@ export default function CsvComparator({
           />
         )}
 
-        <section className="panel mt-5 p-5">
+        <section className={`${activeArea === "mapeamentos" ? "block" : "hidden"} panel mt-5 p-5`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">Mapeamentos</h2>
@@ -1805,14 +1912,14 @@ export default function CsvComparator({
           </div>
         </section>
 
-        <section className="mt-5 grid gap-4 md:grid-cols-4">
+        <section className={`${activeArea === "mapeamentos" ? "grid" : "hidden"} mt-5 gap-4 md:grid-cols-4`}>
           <SummaryCard label="Conferidos" value={summary.ok} tone="emerald" />
           <SummaryCard label="Divergentes" value={summary.different} tone="amber" />
           <SummaryCard label="Ausentes no B" value={summary.missingTarget} tone="rose" />
           <SummaryCard label="Ausentes no A" value={summary.missingSource} tone="slate" />
         </section>
 
-        <section className="panel mt-5 overflow-hidden">
+        <section className={`${activeArea === "mapeamentos" ? "block" : "hidden"} panel mt-5 overflow-hidden`}>
           <div className="border-b border-slate-200 px-5 py-4">
             <h2 className="text-lg font-semibold text-slate-950">Resultado</h2>
             <p className="mt-1 text-sm text-slate-500">
@@ -1855,6 +1962,7 @@ export default function CsvComparator({
           </div>
         </section>
       </section>
+      </div>
     </main>
   );
 }
@@ -2701,6 +2809,104 @@ function DataPoint({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-xl font-semibold text-slate-950">{value}</p>
     </div>
   );
+}
+
+function DimensionDashboard({
+  dimension,
+  label,
+  rules,
+  checksByRule,
+  periodicityByRule,
+  loading,
+  automaticRuleCompleted,
+  onSelectRule,
+}: {
+  dimension: number;
+  label: string;
+  rules: StoredComparisonRule[];
+  checksByRule: Map<string, Map<number, ComparisonRuleCheck>>;
+  periodicityByRule: Map<string, PeriodicityKey>;
+  loading: boolean;
+  automaticRuleCompleted: boolean;
+  onSelectRule: (code: string) => void;
+}) {
+  const palette = ["#075985", "#0369a1", "#0284c7", "#1d4ed8"];
+  const accent = palette[dimension - 1] ?? palette[0];
+  const items = rules.map((rule) => {
+    const periodicityKey = periodicityByRule.get(rule.code) ?? inferRulePeriodicity(rule.item);
+    const periodicity = getRulePeriodicity(periodicityKey);
+    const saved = checksByRule.get(rule.code);
+    const completedPeriods = saved
+      ? [...saved.values()].filter((check) => Boolean(check.completedDate) || check.quantity != null).length
+      : 0;
+    const normalizedStatus = normalizeSearch(rule.status);
+    let status: DimensionItemStatus = "pending";
+
+    if (periodicityKey === "not_applicable" || normalizedStatus.includes("nao aplic")) status = "not_applicable";
+    else if (rule.code === "D1_00021" && automaticRuleCompleted) status = "total";
+    else if (completedPeriods > 0 && completedPeriods >= periodicity.periods) status = "total";
+    else if (completedPeriods > 0) status = "partial";
+    else if (normalizedStatus.includes("realiz") || normalizedStatus.includes("conclu") || normalizedStatus.includes("pontuou total")) status = "total";
+    else if (normalizedStatus.includes("parcial")) status = "partial";
+
+    return { rule, status };
+  });
+  const counts = items.reduce<Record<DimensionItemStatus, number>>((totals, item) => {
+    totals[item.status] += 1;
+    return totals;
+  }, { total: 0, partial: 0, pending: 0, not_applicable: 0 });
+  const applicable = Math.max(items.length - counts.not_applicable, 0);
+  const progress = applicable ? Math.round(((counts.total + counts.partial * 0.5) / applicable) * 100) : 0;
+  const totalForChart = Math.max(items.length, 1);
+  const totalEnd = (counts.total / totalForChart) * 100;
+  const partialEnd = totalEnd + (counts.partial / totalForChart) * 100;
+  const pendingEnd = partialEnd + (counts.pending / totalForChart) * 100;
+  const chart = `conic-gradient(#075985 0 ${totalEnd}%, #38bdf8 ${totalEnd}% ${partialEnd}%, #2563eb ${partialEnd}% ${pendingEnd}%, #cbd5e1 ${pendingEnd}% 100%)`;
+  const statusStyle: Record<DimensionItemStatus, string> = {
+    total: "border-sky-800 bg-sky-800 text-white",
+    partial: "border-sky-400 bg-sky-100 text-sky-900",
+    pending: "border-blue-500 bg-white text-blue-700",
+    not_applicable: "border-slate-300 bg-slate-100 text-slate-500",
+  };
+
+  return (
+    <section className="panel mt-6 overflow-hidden" aria-labelledby={`dimension-${dimension}-title`}>
+      <div className="px-5 py-5 text-white sm:px-6" style={{ background: `linear-gradient(115deg, ${accent}, #172554)` }}>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/75">Visão geral do checklist</p>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+          <div><h2 id={`dimension-${dimension}-title`} className="text-2xl font-semibold">{label}</h2><p className="mt-1 text-sm text-white/75">Acompanhe o que já foi ajustado e priorize os itens pendentes.</p></div>
+          <p className="text-sm font-semibold">{progress}% de avanço</p>
+        </div>
+      </div>
+      {loading ? <p className="p-8 text-center text-sm text-slate-500">Carregando indicadores…</p> : (
+        <div className="p-5 sm:p-6">
+          <div className="grid gap-5 xl:grid-cols-[260px_1fr]">
+            <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-5">
+              <div className="grid h-44 w-44 place-items-center rounded-full" style={{ background: chart }} aria-label={`${progress}% de avanço`}>
+                <div className="grid h-28 w-28 place-items-center rounded-full bg-white text-center shadow-inner"><div><strong className="block text-3xl text-slate-950">{progress}%</strong><span className="text-xs font-medium text-slate-500">avanço geral</span></div></div>
+              </div>
+              <p className="mt-4 text-sm font-medium text-slate-600">{items.length} itens avaliados</p>
+            </div>
+            <div className="grid content-start gap-3 sm:grid-cols-2">
+              <DashboardMetric label="Pontuou total" value={counts.total} tone="deepBlue" />
+              <DashboardMetric label="Pontuou parcial" value={counts.partial} tone="sky" />
+              <DashboardMetric label="Ainda não pontuou" value={counts.pending} tone="blue" />
+              <DashboardMetric label="Não aplicável" value={counts.not_applicable} tone="slate" />
+            </div>
+          </div>
+          <div className="mt-7 flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-950">Mapa dos itens</h3><p className="mt-1 text-sm text-slate-500">Clique em um item para abrir seus detalhes.</p></div><span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">{counts.pending} ajustes pendentes</span></div>
+          <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7 md:grid-cols-9 xl:grid-cols-12">
+            {items.map(({ rule, status }) => <button key={rule.code} type="button" onClick={() => onSelectRule(rule.code)} title={`${rule.code} — ${rule.item}`} className={`relative min-h-12 rounded-md border px-1 py-2 text-xs font-bold transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 ${statusStyle[status]}`}>{Number(rule.code.split("_")[1])}<span className="sr-only">: {rule.item}</span>{status === "not_applicable" && <span aria-hidden="true" className="absolute inset-0 grid place-items-center text-2xl font-light text-sky-700/70">×</span>}</button>)}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DashboardMetric({ label, value, tone }: { label: string; value: number; tone: "deepBlue" | "sky" | "blue" | "slate" }) {
+  const styles = { deepBlue: "border-sky-200 bg-sky-50 text-sky-900", sky: "border-cyan-200 bg-cyan-50 text-cyan-800", blue: "border-blue-200 bg-blue-50 text-blue-800", slate: "border-slate-200 bg-slate-50 text-slate-700" };
+  return <div className={`rounded-xl border p-4 ${styles[tone]}`}><p className="text-xs font-semibold uppercase tracking-wide opacity-75">{label}</p><p className="mt-2 text-3xl font-semibold">{value}</p></div>;
 }
 
 function SummaryCard({

@@ -1,0 +1,171 @@
+D1_00001	Homologação de todos os RREOs
+D1_00002	Homologação da DCA
+D1_00003	Homologação de todos os RGFs do poder Executivo
+D1_00004	Homologação de todos os RGFs do poder Legislativo
+D1_00005	Homologação de todos os RGFs do Judiciário
+D1_00006	Tempestividade na homologação dos RREOs
+D1_00007	Tempestividade na homologação da DCA
+D1_00008	Tempestividade na homologação dos RGFs do poder Executivo
+D1_00009	Tempestividade na homologação dos RGFs do poder Legislativo
+D1_00010	Tempestividade na homologação dos RGFs do Judiciário
+D1_00011	Quantidade de retificações dos RREOs do exercício
+D1_00012	Quantidade de retificações da DCA
+D1_00013	Quantidade de retificações dos RGFs do poder executivo no exercício
+D1_00014	Quantidade de retificações dos RGFs do poder Legislativo no exercício
+D1_00015	Quantidade de retificações dos RGFs do Judiciário
+D1_00016	Envio de todas as MSCs do período
+D1_00017	Envio de MSCs com valores negativos
+D1_00018	Envio de MSCs com contas com movimentação inconsistente: SI + MOV <> SF
+D1_00019	Envio de MSCs com códigos de poder/órgão incorretos
+D1_00020	Envio de MSCs com diferenças nos saldos entre meses diferentes
+D1_00021	Envio de MSCs com contas do ativo com saldo invertido incorretamente
+D1_00022	Envio de de MSCs com todos os códigos de poder/órgão
+D1_00023	Envio de MSCs com dados do poder executivo iguais entre meses diferentes
+D1_00024	Envio de MSCs com dados do legislativo iguais entre meses diferentes
+D1_00025	Envio de MSCs com contas do passivo com saldo invertido incorretamente
+D1_00026	Envio de MSCs com contas de patrimônio líquido com saldo invertido incorretamente
+D1_00027	Envio de MSCs com contas com atributo F (financeiro) sem detalhamento de fonte ou destinação de recursos
+D1_00028	Envio de MSCs com todas as classes de contas (Patrimonial
+D1_00029	Envio de MSCs com contas de receita orçamentária e deduções sem detalhamento de fonte  ou destinação de recurso
+D1_00030	Envio de MSCs com contas de receita orçamentária e deduções sem o detalhamento de natureza de receita
+D1_00031	Envio de MSCs com contas de despesa orçamentária sem o detalhamento de natureza de despesa
+D1_00032	Envio de MSCs com contas de despesa orçamentária sem o detalhamento de função/subfunção
+D1_00033	Envio de MSCs com contas de despesa orçamentária sem o detalhamento de fonte ou destinação de recursos
+D1_00034	Envio de MSC com contas de VPD com saldo invertido incorretamente
+D1_00035	Envio de MSC com contas de VPA com saldo invertido incorretamente
+D1_00036	Envio de MSC encerramento com saldo final nas contas VPA e VPD
+D2_00001	Informação da variação patrimonial aumentativa do FUNDEB no Anexo I-HI da DCA
+D2_00002	Informação da variação patrimonial diminutiva do FUNDEB no Anexo I-HI da DCA
+D2_00003	Informação de deduções de receitas para formação do FUNDEB no Anexo I-C da DCA
+D2_00004	Informação das receitas orçamentárias do FUNDEB no Anexo I-C da DCA
+D2_00005	Informação das despesas orçamentárias com encargos patronais no Anexo I-D da DCA
+D2_00006	Informação das despesas orçamentárias com pessoal no Anexo I-D da DCA
+D2_00007	Informação de despesas orçamentárias de custeio no Anexo I-D da DCA
+D2_00008	Informação das despesa orçamentárias por função no Anexo I-E da DCA
+D2_00010	Informação das receitas de transferências intergovernamentais no Anexo I-C da DCA
+D2_00011	Informação de receitas orçamentárias tributárias no Anexo I-C da DCA
+D2_00012	Avalia a existência de receitas orçamentárias menores que suas deduções no Anexo I-C da DCA
+D2_00013	Avalia a existência de ajustes para perdas maiores que os ativos originais no Anexo I-AB da DCA para "Créditos a curto e longo prazos"
+D2_00014	Avalia a existência de ajustes para perdas maiores que os ativos originais no Anexo I-AB da DCA para "Demais créditos e valores a curto e longo prazo"
+D2_00015	Informação de valor patrimonial de bens móveis no Anexo I-AB da DCA
+D2_00016	Informação de Depreciação acumulada de bens móveis no Anexo I-AB da DCA
+D2_00017	Informação de variação patrimonial diminutiva de depreciação de bens móveis e imóveis no Anexo I-HI da DCA
+D2_00018	Avalia se o valor dos bens móveis é maior que sua depreciação acumulada no Anexo I-AB da DCA
+D2_00019	Informação do valor patrimonial de bens imóveis no Anexo I-AB da DCA
+D2_00020	Informação de depreciação acumulada de bens imóveis no Anexo I-AB da DCA
+D2_00021	Avalia se o valor dos bens imóveis é maior que sua depreciação acumulada no Anexo I-AB da DCA
+D2_00022	Relação entre a VPA de Contribuições para o RPPS e a Provisão Atuarial do RPPS
+D2_00023	Avalia se o valor de inscrição de restos a pagar não processados no Anexo I-D da DCA é menor ou igual à diferença entre despesas empenhadas e liquidadas
+D2_00024	Avalia se o valor de inscrição de restos a pagar processados no Anexo I-D da DCA é menor ou igual à diferença entre despesas liquidadas e pagas
+D2_00028	Avalia se o valor de Passivo Circulante Financeiro é menor ou igual ao Passivo Circulante no Anexo I-AB da DCA
+D2_00029	Relação entre empréstimos e financiamentos no Anexo I-AB e a VPD  de Juros e Encargos no Anexo I-HI - PIPCP item 10
+D2_00030	Existência de contas de terceiro nível do PCASP com saldos negativos no Anexo - I-AB da DCA
+D2_00031	Existência de contas de terceiro nível do PCASP com saldos negativos no Anexo - I-HI da DCA
+D2_00032	Informação de Ajuste de Dívida Ativa (Tributária + Não Tributária) no Anexo I-AB da DCA
+D2_00033	Informação de receitas que não são de competência do ente no Anexo I-C da DCA
+D2_00034	Existência de contas de quinto nível do PCASP com saldos negativos no Anexo - I-HI da DCA
+D2_00035	Informação de deduções de Receitas com sinal negativo no Anexo I-C da DCA
+D2_00036	Verifica a evidenciação de créditos tributários na DCA
+D2_00037	Verifica a informação de registro de créditos tributários do período no Anexo I-HI da DCA - PIPCP item 1
+D2_00038	Verifica a informação de créditos previdenciários no Anexo I-AB da DCA - PIPCP item 2
+D2_00039	Verifica a evidenciação de provisões por competência
+D2_00040	Existência de contas de quinto nível do PCASP com saldos negativos no Anexo I-AB da DCA
+D2_00043	Relação entre ativo intangível e a respectiva amortização no Anexo I-AB da DCA
+D2_00044	Avalia a igualdade das receitas arrecadadas na MSC de encerramento e no Anexo I-C da DCA
+D2_00045	Avalia a igualdade das receitas com tributos estaduais na MSC de encerramento e no Anexo I-C da DCA
+D2_00046	Avalia a igualdade das receitas com tributos municipais na MSC de encerramento e no Anexo I-C da DCA
+D2_00047	Avalia a igualdade das receitas estaduais com transferências constitucionais na MSC de encerramento e no Anexo I-C da DCA
+D2_00048	Verifica a igualdade das receitas municipais com transferências constitucionais na MSC de dezembro e no Anexo I-C da DCA
+D2_00049	Verifica a igualdade das Despesas Orçamentárias empenhadas
+D2_00050	Verifica a igualdade dos Restos a Pagar processados e não processados na MSC de encerramento e no Anexo I-D da DCA
+D2_00051	Verifica se o total de ajustes para perdas de estoques é maior que o saldo de estoques no Anexo I-AB da DCA
+D2_00052	Avalia a relação entre VPA ou VPD com resultado de equivalência patrimonial no Anexo I-H e participações permanentes no Anexo I-AB da DCA
+D2_00053	Verifica se o total de ajustes para perdas de estoques é maior que o saldo de estoques na MSC de Encerramento
+D2_00054	Avalia
+D2_00055	Avalia se o valor dos ativos intangíveis é maior que sua amortização acumulada na MSC de Encerramento
+D2_00058	Avalia se os valores de VPA e VPD com Fundeb estão iguais entre a MSC de encerramento e o Anexo I-HI da DCA
+D2_00059	Avalia a existência de ajustes para perdas maiores que os ativos originais na MSC de encerramento para "Créditos a curto e longo prazos"
+D2_00060	Avalia a existência de ajustes para perdas maiores que os ativos originais na MSC de encerramento para "Demais créditos e valores a curto e longo prazo"
+D2_00061	Informação da variação patrimonial aumentativa do FUNDEB no Anexo I-HI da DCA
+D2_00066	Avalia se o valor dos ativos intangíveis é maior que sua amortização acumulada no Anexo I-AB da DCA
+D2_00067	Avalia se o valor dos bens móveis é maior que sua depreciação acumulada na MSC de encerramento
+D2_00068	Avalia se o valor dos bens imóveis é maior que sua depreciação acumulada na MSC de encerramento
+D2_00069	Avalia se o valor de despesas exceto-intra na função 09 (Prev. Social) é igual entre a MSC de encerramento e o Anexo I-E da DCA
+D2_00070	Avalia se o valor de despesas exceto-intra na função 10 (Saúde) é igual entre a MSC de encerramento e o Anexo I-E da DCA
+D2_00071	Avalia se o valor de despesas exceto-intra na função 12 (Educação) é igual entre a MSC de encerramento e o Anexo I-E da DCA
+D2_00072	Avalia se o valor de despesas exceto-intra nas funções diferentes de 09
+D2_00073	Avalia se o valor de despesas intraorçamentárias com detalhamento de função/subfunção é igual entre a MSC de encerramento e o Anexo I-E da DCA
+D2_00074	Avalia a igualdade entre os saldos finais de RPP pagos e RPNP pagos na MSC de Encerramento e no Anexo I-F da DCA
+D2_00076	Verifica se houve evidenciação de créditos previdenciários parcelados
+D2_00077	Verificação de execução de passivos por competência
+D2_00079	Verifica se os valores pagos antecipadamente estão sendo baixados por competência.
+D2_00080	Verifica se foi reconhecido
+D2_00081	Verifica se houve evidenciação de obrigações por competência decorrentes de benefícios a empregados
+D2_00082	Verifica se houve movimentação mensal nas contas patrimoniais de depreciação
+D2_00083	Verifica o cumprimento das regras de integridade de DDR
+D2_00084	Avalia se a soma total de passivo financeiro e permanente da DCA é maior ou igual ao total da soma do passivo circulante e não circulante na MSC de dezembro.
+D2_00085	Avalia se o total da soma do passivo financeiro e permanente na DCA é maior ou igual ao total de ativo circulante e  passivo circulante na DCA.
+D3_00001	Avalia a correta informação do déficit ou superávit orçamentário no Anexo 01 do RREO
+D3_00002	Igualdade da Informação de despesas orçamentárias entre os anexos 1 e 2 do RREO
+D3_00003	Igualdade da Informação de despesas orçamentárias entre os anexos 1 e 6 do RREO
+D3_00005	Igualdade da Receita Corrente Líquida (RCL) entre o Anexo 03 do RREO e os Anexos 01
+D3_00006	Igualdade da Dívida Consolidada Líquida (DCL) entre o Anexo 06 do RREO e o Anexo 02 do RGF do poder executivo
+D3_00007	Igualdade da previsão atualizada de receitas e receitas realizadas entre anexos 01 e 06 do RREO
+D3_00008	Igualdade dos restos a pagar não processados entre o Anexo 01 do RREO e o Anexo 05 do RGF de todos os poderes/órgãos
+D3_00009	Igualdade dos restos a pagar processados e não processados entre o Anexo 07 do RREO e o Anexo 05 do RGF de todos os poderes/órgãos
+D3_00010	Igualdade da Receita Corrente Líquida (RCL) no Anexo 01 do RGF de todos os poderes/órgãos
+D3_00011	Dedução de inativos e pensionistas com recursos vinculados menor ou igual ao valor com inativos e pensionistas no Anexo 01 do RGF de todos os poderes/órgãos
+D3_00012	Informação de valores negativos no RREO
+D3_00013	Informação de valores negativos no RGF de todos os poderes/órgãos
+D3_00014	Igualdade das Transferências Obrigatórias da União Relativas às Emendas Individuais nos Anexos 01
+D3_00015	Igualdade das Transferências Relativas às Emendas Individuais entre o Anexo 03 do RREO e o Anexo 01 do RGF do poder executivo
+D3_00016	Igualdade das Transferências Relativas às Emendas de bancada entre o Anexo 03 do RREO e o Anexo 01 do RGF do poder executivo
+D3_00017	Igualdade entre os Restos a Pagar (Processados e Não-Processados) Pagos no Exercício do Anexo 6 do RREO com os Restos a Pagar (Processados e Não-Processados) Pagos do Anexo 7 do RREO 
+D3_00021	Verifica se o somatório do passivo circulante e passivo não circulante (apenas financeiros) é maior ou igual aos Restos a Pagar (liquidados ou em liquidação) da MSC dezembro - PO - Poder Executivo mais PO RPPS
+D3_00022	Igualdade das "Receitas  Correntes Orçamentárias" e "Receitas Correntes Intraorçamentárias" no Anexo 1 do RREO e dos valores da MSC de dezembro. 
+D3_00023	Igualdade das "Receitas de Capital Orçamentárias" e "Receitas de Capital Intraorçamentárias" no Anexo 1 do RREO e da MSC de dezembro. 
+D3_00024	Igualdade das "Despesas  Correntes Orçamentárias" e "Despesas Correntes Intraorçamentárias" no Anexo 1 do RREO e dos valores da MSC de dezembro.
+D3_00025	Igualdade das "Despesas de Capital Orçamentárias" e "Despesas de Capital Intraorçamentárias" no Anexo 1 do RREO e da MSC de dezembro. 
+D3_00026	Verifica os valores de Caixa e Equivalentes de Caixa por grupos de Fontes de Recursos do Anexo 5 do RGF
+D3_00027	Verifica a igualdade entre Dotação atualizada
+D3_00028	Igualdade no total das "Receitas Realizadas Até o Bimestre" - Anexo 1 e Anexo 6. 
+D4_00001	Igualdade da receita realizada entre o Anexo I-C da DCA e o Anexo 01 do RREO 6ºB
+D4_00002	Igualdade da execução da despesa entre o Anexo I-D da DCA e o Anexo 01 do RREO 6ºB
+D4_00003	Igualdade da execução da despesa por função entre o Anexo I-E da DCA e o Anexo 02 do RREO 6ºB (exceto intraorçamentária)
+D4_00004	Igualdade da execução da despesa por função entre o Anexo I-E da DCA e o Anexo 02 do RREO 6ºB (intraorçamentária)
+D4_00005	Igualdade dos restos a pagar não processados e processados entre o Anexo I-F da DCA e o Anexo 07 do RREO 6ºB
+D4_00006	Igualdade dos restos a pagar não processados entre o Anexo I-G da DCA e o Anexo 07 do RREO 6ºB
+D4_00007	Igualdade dos restos a pagar processados entre o Anexo I-G da DCA e o Anexo 07 do RREO 6ºB
+D4_00008	Igualdade das receitas com alienação de ativos entre a o Anexo I-C da DCA e o Anexo 11 do RREO 6ºB
+D4_00009	Igualdade das receitas com tributos estaduais entre o Anexo I-C da DCA e o Anexo 03 do RREO 6ºB
+D4_00010	Igualdade das receitas com tributos municipais entre o Anexo I-C da DCA e o Anexo 03 do RREO 6ºB
+D4_00011	Igualdade das transferências estaduais entre o Anexo I-C da DCA e o Anexo 03 do RREO 6ºB
+D4_00012	Igualdade das transferências municipais entre o Anexo I-C da DCA e o Anexo 03 do RREO 6ºB
+D4_00013	Igualdade das receitas com tributos estaduais entre o Anexo I-C da DCA e o Anexo 06 do RREO 6ºB
+D4_00014	Igualdade das receitas com tributos municipais entre o Anexo I-C da DCA e o Anexo 06 do RREO 6ºB
+D4_00015	Igualdade das transferências constitucionais estaduais entre o Anexo I-C da DCA e o Anexo 06 do RREO 6ºB
+D4_00016	Igualdade das transferências constitucionais municipais entre o Anexo I-C da DCA e o Anexo 06 do RREO 6ºB
+D4_00017	Igualdade das contrib. dos servidores e compensações financeiras entre o Anexo I-C da DCA e o Anexo 03 do RREO 6ºB
+D4_00019	Igualdade do valor das despesas de capital entre o Anexo I-D da DCA e o Anexo 09 do RREO 6ºB
+D4_00020	Igualdade nas receitas arrecadadas na MSC de dezembro e no Anexo 01 do RREO 6ºB
+D4_00021	Igualdade nas receitas com tributos estaduais na MSC de dezembro e no Anexo 03 do RREO 6ºB
+D4_00022	Igualdade nas receitas com tributos municipais na MSC de dezembro e no Anexo 03 do RREO 6ºB
+D4_00023	Igualdade nas receitas estaduais com transferências constitucionais na MSC de dezembro e no Anexo 03 do RREO 6ºB
+D4_00024	Igualdade nas receitas municipais com transferências constitucionais na MSC de dezembro e no Anexo 03 do RREO 6ºB
+D4_00025	Igualdade das Despesas Orçamentárias empenhadas
+D4_00026	Igualdade dos Restos a Pagar não processados no Anexo 01 do RREO 6ºB e na MSC de dezembro
+D4_00027	Avalia se o valor de caixa e equivalente de caixas do Anexo 02 do RGF é menor ou igual ao saldo de caixa e equivalentes do Anexo 01 da DCA
+D4_00028	Avalia se o valor de caixa e equivalente de caixas do Anexo 05 do RGF é menor ou igual ao saldo de caixa e equivalentes do Anexo 01 da DCA
+D4_00029	Avalia se o valor de despesas exceto-intra na função 09 (Prev. Social) é igual entre a MSC de Dezembro e o Anexo 02 do RREO
+D4_00030	Avalia se o valor de despesas exceto-intra na função 10 (Saúde) é igual entre a MSC de Dezembro e o Anexo 02 do RREO
+D4_00031	Avalia se o valor de despesas exceto-intra na função 12 (Educação) é igual entre a MSC de Dezembro e o Anexo 02 do RREO
+D4_00032	Avalia se o valor de despesas exceto-intra nas funções diferentes de 09
+D4_00033	Avalia se o valor de despesas intraorçamentárias com detalhamento de função/subfunção é igual entre a MSC de Dezembro e o Anexo 02 do RREO
+D4_00034	Avalia a igualdade entre os saldos finais de RPP pagos e RPNP pagos na MSC de Dezembro e no Anexo 07 do RREO
+D4_00035	Avalia se o valor de caixa e equivalente de caixas do Anexo 05 do RGF é menor ou igual ao saldo de caixa e equivalentes da MSC de encerramento
+D4_00036	Avalia se o valor de caixa e equivalente de caixas do Anexo 02 do RGF é menor ou igual ao saldo de caixa e equivalentes do Anexo 01 da MSC de encerramento
+D4_00037	Igualdade nas receitas de Tributos (ICMS
+D4_00038	Igualdade nas receitas de Tributos ( IPTU
+D4_00039	Igualdade no valor das transferências constitucionais   ( Cota-Parte do FPE e Transferências do FUNDEB)  entre os anexos 6 RREO X MSC de dezembro
+D4_00040	Igualdade no valor das transferências constitucionais (  Cota-Parte do FPM
+D4_00041	Avalia o impacto nas contas de natureza de informação patrimonial
