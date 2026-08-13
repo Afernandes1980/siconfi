@@ -105,8 +105,8 @@ O banco contém as seguintes tabelas:
 - `account_natures`: natureza padrão das classes contábeis; recebe automaticamente as classes 1 a 8.
 - `msc_layout_sheets`: linhas brutas importadas do leiaute MSC.
 - `power_bodies_2026`: códigos e nomenclaturas da aba `PO` (Poder e Órgão).
-- `msc_balance_imports`: competências das MSC importadas para a regra `D1_00020`.
-- `msc_balance_rows`: saldos iniciais e finais da MSC por competência e chave dimensional.
+- `organization_msc_imports`: competências das MSC importadas por entidade para a regra `D1_00020`.
+- `organization_msc_rows`: saldos iniciais e finais da MSC isolados por entidade, competência e chave dimensional.
 - `pcasp_extended_2026`: contas e naturezas do PCASP Estendido 2026.
 - `official_fiscal_documents`: metadados dos documentos fiscais oficiais.
 - `official_fiscal_rules`: regras fiscais oficiais exibidas pela aplicação.
@@ -211,7 +211,7 @@ scripts/
 - `GET /api/msc-balances`: consulta o histórico do exercício mais recente (`D1_00020`).
 - `POST /api/msc-balances`: grava os saldos da MSC e compara competências consecutivas (`D1_00020`).
 
-Na regra `D1_00020`, cada competência permanece armazenada separadamente, permitindo manter os doze meses do exercício. Depois de cada importação, todas as transições mensais disponíveis no exercício são recalculadas. Saldos iniciais (`beginning_balance`) iguais a zero são desconsiderados na comparação com o saldo final do mês anterior.
+Na regra `D1_00020`, cada competência permanece armazenada separadamente para a entidade selecionada, permitindo manter os doze meses do exercício sem misturar empresas. Depois de cada importação, todas as transições mensais disponíveis no exercício da entidade são recalculadas. Saldos iniciais (`beginning_balance`) iguais a zero são desconsiderados na comparação com o saldo final do mês anterior.
 
 Na regra `D1_00022`, toda linha da MSC com `TIPO1` igual a `PO` deve possuir o código de Poder e Órgão preenchido em `IC1`.
 
