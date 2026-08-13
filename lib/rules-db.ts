@@ -86,6 +86,7 @@ export type MscBalanceComparison = {
   exercise: MscExerciseSummary;
   differences: MscBalanceDifference[];
   status: "compared" | "no_previous";
+  automaticRuleResults: Array<{ ruleCode: string; passed: boolean }>;
 };
 
 export type MscExerciseSummary = {
@@ -149,8 +150,37 @@ async function initialize() {
   await migrateComparisonRulePeriodicities();
   await migrateComparisonRuleCheckQuantities();
   await migrateOrganizations();
+  await migrateOrganizationMscImports();
   await seedAccountNatures();
   await seedOfficialFiscalPackage();
+}
+
+async function migrateOrganizationMscImports() {
+  await database.execute(`
+    INSERT OR IGNORE INTO organization_msc_imports
+      (organization_id, competence_key, competence_label, source_file, imported_at)
+    SELECT o.id, i.competence_key, i.competence_label, i.source_file, i.imported_at
+    FROM msc_balance_imports i JOIN organizations o ON o.code = 'DEMO'
+  `);
+  await database.execute(`
+    INSERT OR IGNORE INTO organization_msc_rows
+      (organization_id, competence_key, comparison_key, key_json, value_type, balance_value, raw_value, value_nature, row_number)
+    SELECT o.id, r.competence_key, r.comparison_key, r.key_json, r.value_type,
+           r.balance_value, r.raw_value, r.value_nature, r.row_number
+    FROM msc_balance_rows r JOIN organizations o ON o.code = 'DEMO'
+  `);
+  await database.execute(`
+    INSERT OR IGNORE INTO organization_msc_power_body_usage
+      (organization_id, competence_key, code, occurrence_count)
+    SELECT o.id, u.competence_key, u.code, u.occurrence_count
+    FROM msc_power_body_usage u JOIN organizations o ON o.code = 'DEMO'
+  `);
+  await database.execute(`
+    INSERT OR IGNORE INTO organization_msc_power_body_rows
+      (organization_id, competence_key, code, row_signature, occurrence_count)
+    SELECT o.id, r.competence_key, r.code, r.row_signature, r.occurrence_count
+    FROM msc_power_body_rows r JOIN organizations o ON o.code = 'DEMO'
+  `);
 }
 
 async function migrateOrganizations() {
@@ -460,40 +490,43 @@ export async function listResourceSources() {
 }
 
 export async function saveAndCompareMscBalances(
+  organizationId: number,
   competenceKey: string,
   competenceLabel: string,
   sourceFile: string,
   rows: MscBalanceRow[],
   powerBodyCodes: Array<{ code: string; count: number }> = [],
   powerBodyRows: Array<{ code: string; signature: string; count: number }> = [],
+  clientRuleResults: Array<{ ruleCode: string; passed: boolean; details?: string }> = [],
 ): Promise<MscBalanceComparison> {
   await initializeDatabase();
 
   await database.batch([
-    { sql: "DELETE FROM msc_balance_rows WHERE competence_key = ?", args: [competenceKey] },
+    { sql: "DELETE FROM organization_msc_rows WHERE organization_id = ? AND competence_key = ?", args: [organizationId, competenceKey] },
     {
-      sql: `INSERT INTO msc_balance_imports (competence_key, competence_label, source_file)
-            VALUES (?, ?, ?)
-            ON CONFLICT(competence_key) DO UPDATE SET
+      sql: `INSERT INTO organization_msc_imports (organization_id, competence_key, competence_label, source_file)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(organization_id, competence_key) DO UPDATE SET
               competence_label = excluded.competence_label,
               source_file = excluded.source_file,
               imported_at = CURRENT_TIMESTAMP`,
-      args: [competenceKey, competenceLabel, sourceFile],
+      args: [organizationId, competenceKey, competenceLabel, sourceFile],
     },
   ], "immediate");
 
   const statements = rows.map((row) => ({
-    sql: `INSERT INTO msc_balance_rows (
-            competence_key, comparison_key, key_json, value_type, balance_value,
+    sql: `INSERT INTO organization_msc_rows (
+            organization_id, competence_key, comparison_key, key_json, value_type, balance_value,
             raw_value, value_nature, row_number
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(competence_key, comparison_key, value_type) DO UPDATE SET
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(organization_id, competence_key, comparison_key, value_type) DO UPDATE SET
             key_json = excluded.key_json,
             balance_value = excluded.balance_value,
             raw_value = excluded.raw_value,
             value_nature = excluded.value_nature,
             row_number = excluded.row_number`,
     args: [
+      organizationId,
       competenceKey,
       row.comparisonKey,
       JSON.stringify(row.keyValues),
@@ -509,45 +542,53 @@ export async function saveAndCompareMscBalances(
     await database.batch(statements.slice(index, index + 400), "immediate");
   }
 
-  await database.execute("DELETE FROM msc_power_body_usage WHERE competence_key = ?", [competenceKey]);
+  await database.execute("DELETE FROM organization_msc_power_body_usage WHERE organization_id = ? AND competence_key = ?", [organizationId, competenceKey]);
   if (powerBodyCodes.length > 0) {
     await database.batch(powerBodyCodes.map((item) => ({
-      sql: `INSERT INTO msc_power_body_usage (competence_key, code, occurrence_count)
-            VALUES (?, ?, ?)
-            ON CONFLICT(competence_key, code) DO UPDATE SET
+      sql: `INSERT INTO organization_msc_power_body_usage (organization_id, competence_key, code, occurrence_count)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(organization_id, competence_key, code) DO UPDATE SET
               occurrence_count = excluded.occurrence_count`,
-      args: [competenceKey, item.code, item.count],
+      args: [organizationId, competenceKey, item.code, item.count],
     })), "immediate");
   }
 
-  await database.execute("DELETE FROM msc_power_body_rows WHERE competence_key = ?", [competenceKey]);
+  await database.execute("DELETE FROM organization_msc_power_body_rows WHERE organization_id = ? AND competence_key = ?", [organizationId, competenceKey]);
   if (powerBodyRows.length > 0) {
     for (let index = 0; index < powerBodyRows.length; index += 400) {
       await database.batch(powerBodyRows.slice(index, index + 400).map((item) => ({
-        sql: `INSERT INTO msc_power_body_rows (competence_key, code, row_signature, occurrence_count)
-              VALUES (?, ?, ?, ?)
-              ON CONFLICT(competence_key, code, row_signature) DO UPDATE SET
+        sql: `INSERT INTO organization_msc_power_body_rows (organization_id, competence_key, code, row_signature, occurrence_count)
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(organization_id, competence_key, code, row_signature) DO UPDATE SET
                 occurrence_count = excluded.occurrence_count`,
-        args: [competenceKey, item.code, item.signature, item.count],
+        args: [organizationId, competenceKey, item.code, item.signature, item.count],
       })), "immediate");
     }
   }
 
   const previousCompetenceKey = previousMonth(competenceKey);
   const previousImport = await database.get(
-    "SELECT competence_key FROM msc_balance_imports WHERE competence_key = ? LIMIT 1",
-    previousCompetenceKey,
+    "SELECT competence_key FROM organization_msc_imports WHERE organization_id = ? AND competence_key = ? LIMIT 1",
+    [organizationId, previousCompetenceKey],
   );
   const storedCompetencesResult = await database.execute(`
     SELECT competence_key AS competenceKey
-    FROM msc_balance_imports
+    FROM organization_msc_imports
+    WHERE organization_id = ?
     ORDER BY competence_key
-  `);
+  `, [organizationId]);
   const storedCompetences = resultRows<{ competenceKey: string }>(storedCompetencesResult)
     .map((item) => item.competenceKey);
-  const exercise = await getMscExerciseSummary(competenceKey.slice(0, 4));
+  const exercise = await getMscExerciseSummary(organizationId, competenceKey.slice(0, 4));
+
+  const serverRuleResults = [
+    ...(previousImport ? [{ ruleCode: "D1_00020", passed: false, details: "Comparacao em processamento" }] : []),
+    ...(exercise.executivePowerBodies.length > 0 ? [{ ruleCode: "D1_00023", passed: exercise.executiveConsistent, details: `${exercise.executivePowerBodies.length} codigo(s) executivo(s)` }] : []),
+    ...(exercise.legislativeDataCompetences.length > 0 ? [{ ruleCode: "D1_00024", passed: exercise.legislativeConsistent, details: `${exercise.legislativeDuplicateGroups.length} grupo(s) repetido(s)` }] : []),
+  ];
 
   if (!previousImport) {
+    await saveAutomaticRuleResults(organizationId, competenceKey, [...clientRuleResults, ...serverRuleResults]);
     return {
       competenceKey,
       previousCompetenceKey,
@@ -557,6 +598,7 @@ export async function saveAndCompareMscBalances(
       exercise,
       differences: [],
       status: "no_previous",
+      automaticRuleResults: await listLatestAutomaticRuleResults(organizationId),
     };
   }
 
@@ -564,10 +606,11 @@ export async function saveAndCompareMscBalances(
     `SELECT competence_key AS competenceKey, comparison_key AS comparisonKey,
                  key_json AS keyJson, value_type AS valueType, balance_value AS balanceValue,
                  value_nature AS valueNature, row_number AS rowNumber
-          FROM msc_balance_rows
-          WHERE (competence_key = ? AND value_type = 'ending_balance')
-             OR (competence_key = ? AND value_type = 'beginning_balance')`,
-    [previousCompetenceKey, competenceKey],
+          FROM organization_msc_rows
+          WHERE organization_id = ? AND (
+            (competence_key = ? AND value_type = 'ending_balance')
+             OR (competence_key = ? AND value_type = 'beginning_balance'))`,
+    [organizationId, previousCompetenceKey, competenceKey],
   );
   const balanceRows = resultRows<{
     competenceKey: string;
@@ -620,6 +663,13 @@ export async function saveAndCompareMscBalances(
     });
   }
 
+  const automaticResults = [
+    ...clientRuleResults,
+    ...serverRuleResults.filter((item) => item.ruleCode !== "D1_00020"),
+    { ruleCode: "D1_00020", passed: differences.length === 0, details: `${differences.length} diferenca(s)` },
+  ];
+  await saveAutomaticRuleResults(organizationId, competenceKey, automaticResults);
+
   return {
     competenceKey,
     previousCompetenceKey,
@@ -629,26 +679,62 @@ export async function saveAndCompareMscBalances(
     exercise,
     differences,
     status: "compared",
+    automaticRuleResults: await listLatestAutomaticRuleResults(organizationId),
   };
 }
 
-export async function getLatestMscExerciseSummary() {
+async function saveAutomaticRuleResults(
+  organizationId: number,
+  competenceKey: string,
+  results: Array<{ ruleCode: string; passed: boolean; details?: string }>,
+) {
+  if (results.length === 0) return;
+  await database.batch(results.map((result) => ({
+    sql: `INSERT INTO organization_automatic_rule_results
+            (organization_id, competence_key, rule_code, passed, details)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(organization_id, competence_key, rule_code) DO UPDATE SET
+            passed = excluded.passed, details = excluded.details, evaluated_at = CURRENT_TIMESTAMP`,
+    args: [organizationId, competenceKey, result.ruleCode, result.passed ? 1 : 0, result.details ?? ""],
+  })), "immediate");
+}
+
+export async function listLatestAutomaticRuleResults(organizationId: number) {
+  await initializeDatabase();
+  const result = await database.execute(`
+    SELECT r.rule_code AS ruleCode, r.passed
+    FROM organization_automatic_rule_results r
+    INNER JOIN (
+      SELECT rule_code, MAX(competence_key) AS competence_key
+      FROM organization_automatic_rule_results
+      WHERE organization_id = ?
+      GROUP BY rule_code
+    ) latest ON latest.rule_code = r.rule_code AND latest.competence_key = r.competence_key
+    WHERE r.organization_id = ?
+    ORDER BY r.rule_code
+  `, [organizationId, organizationId]);
+  return resultRows<{ ruleCode: string; passed: number }>(result)
+    .map((item) => ({ ruleCode: item.ruleCode, passed: Boolean(item.passed) }));
+}
+
+export async function getLatestMscExerciseSummary(organizationId: number) {
   await initializeDatabase();
   const latest = await database.get(
-    "SELECT competence_key AS competenceKey FROM msc_balance_imports ORDER BY competence_key DESC LIMIT 1",
+    "SELECT competence_key AS competenceKey FROM organization_msc_imports WHERE organization_id = ? ORDER BY competence_key DESC LIMIT 1",
+    [organizationId],
   ) as { competenceKey?: string } | undefined;
   return latest?.competenceKey
-    ? getMscExerciseSummary(latest.competenceKey.slice(0, 4))
+    ? getMscExerciseSummary(organizationId, latest.competenceKey.slice(0, 4))
     : null;
 }
 
-async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> {
+async function getMscExerciseSummary(organizationId: number, year: string): Promise<MscExerciseSummary> {
   const importsResult = await database.execute(
     `SELECT competence_key AS competenceKey
-     FROM msc_balance_imports
-     WHERE competence_key LIKE ?
+     FROM organization_msc_imports
+     WHERE organization_id = ? AND competence_key LIKE ?
      ORDER BY competence_key`,
-    [`${year}-%`],
+    [organizationId, `${year}-%`],
   );
   const storedCompetences = resultRows<{ competenceKey: string }>(importsResult)
     .map((item) => item.competenceKey);
@@ -656,9 +742,9 @@ async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> 
   const balancesResult = await database.execute(
     `SELECT competence_key AS competenceKey, comparison_key AS comparisonKey,
             value_type AS valueType, balance_value AS balanceValue, value_nature AS valueNature
-     FROM msc_balance_rows
-     WHERE competence_key LIKE ?`,
-    [`${year}-%`],
+     FROM organization_msc_rows
+     WHERE organization_id = ? AND competence_key LIKE ?`,
+    [organizationId, `${year}-%`],
   );
   const balances = resultRows<{
     competenceKey: string;
@@ -671,12 +757,12 @@ async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> 
   const executiveResult = await database.execute(
     `SELECT usage.code, bodies.name, usage.competence_key AS competenceKey,
             usage.occurrence_count AS occurrenceCount
-     FROM msc_power_body_usage usage
+     FROM organization_msc_power_body_usage usage
      INNER JOIN power_bodies_2026 bodies ON bodies.code = usage.code
-     WHERE usage.competence_key LIKE ?
+     WHERE usage.organization_id = ? AND usage.competence_key LIKE ?
        AND LOWER(bodies.name) LIKE '%poder executivo%'
      ORDER BY usage.code, usage.competence_key`,
-    [`${year}-%`],
+    [organizationId, `${year}-%`],
   );
   const executiveRows = resultRows<{
     code: string;
@@ -700,12 +786,12 @@ async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> 
   const legislativeResult = await database.execute(
     `SELECT usage.code, bodies.name, usage.competence_key AS competenceKey,
             usage.occurrence_count AS occurrenceCount
-     FROM msc_power_body_usage usage
+     FROM organization_msc_power_body_usage usage
      INNER JOIN power_bodies_2026 bodies ON bodies.code = usage.code
-     WHERE usage.competence_key LIKE ?
+     WHERE usage.organization_id = ? AND usage.competence_key LIKE ?
        AND LOWER(bodies.name) LIKE '%poder legislativo%'
      ORDER BY usage.code, usage.competence_key`,
-    [`${year}-%`],
+    [organizationId, `${year}-%`],
   );
   const legislativeRows = resultRows<{
     code: string;
@@ -729,12 +815,12 @@ async function getMscExerciseSummary(year: string): Promise<MscExerciseSummary> 
   const legislativeDataResult = await database.execute(
     `SELECT rows.competence_key AS competenceKey, rows.code, rows.row_signature AS rowSignature,
             rows.occurrence_count AS occurrenceCount
-     FROM msc_power_body_rows rows
+     FROM organization_msc_power_body_rows rows
      INNER JOIN power_bodies_2026 bodies ON bodies.code = rows.code
-     WHERE rows.competence_key LIKE ?
+     WHERE rows.organization_id = ? AND rows.competence_key LIKE ?
        AND LOWER(bodies.name) LIKE '%poder legislativo%'
      ORDER BY rows.competence_key, rows.code, rows.row_signature`,
-    [`${year}-%`],
+    [organizationId, `${year}-%`],
   );
   const legislativeDataRows = resultRows<{
     competenceKey: string;

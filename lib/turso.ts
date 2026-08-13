@@ -280,4 +280,71 @@ export const DATABASE_SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_app_sessions_expires_at
     ON app_sessions (expires_at);
+
+  CREATE TABLE IF NOT EXISTS organization_msc_imports (
+    organization_id INTEGER NOT NULL,
+    competence_key TEXT NOT NULL,
+    competence_label TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (organization_id, competence_key),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_organization_msc_imports_date
+    ON organization_msc_imports (organization_id, imported_at DESC);
+
+  CREATE TABLE IF NOT EXISTS organization_msc_rows (
+    organization_id INTEGER NOT NULL,
+    competence_key TEXT NOT NULL,
+    comparison_key TEXT NOT NULL,
+    key_json TEXT NOT NULL,
+    value_type TEXT NOT NULL CHECK (value_type IN ('beginning_balance', 'ending_balance')),
+    balance_value REAL,
+    raw_value TEXT NOT NULL,
+    value_nature TEXT NOT NULL,
+    row_number INTEGER NOT NULL,
+    PRIMARY KEY (organization_id, competence_key, comparison_key, value_type),
+    FOREIGN KEY (organization_id, competence_key)
+      REFERENCES organization_msc_imports(organization_id, competence_key) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_organization_msc_rows_comparison
+    ON organization_msc_rows (organization_id, comparison_key, competence_key, value_type);
+
+  CREATE TABLE IF NOT EXISTS organization_msc_power_body_usage (
+    organization_id INTEGER NOT NULL,
+    competence_key TEXT NOT NULL,
+    code TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (organization_id, competence_key, code),
+    FOREIGN KEY (organization_id, competence_key)
+      REFERENCES organization_msc_imports(organization_id, competence_key) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS organization_msc_power_body_rows (
+    organization_id INTEGER NOT NULL,
+    competence_key TEXT NOT NULL,
+    code TEXT NOT NULL,
+    row_signature TEXT NOT NULL,
+    occurrence_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (organization_id, competence_key, code, row_signature),
+    FOREIGN KEY (organization_id, competence_key)
+      REFERENCES organization_msc_imports(organization_id, competence_key) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS organization_automatic_rule_results (
+    organization_id INTEGER NOT NULL,
+    competence_key TEXT NOT NULL,
+    rule_code TEXT NOT NULL,
+    passed INTEGER NOT NULL CHECK (passed IN (0, 1)),
+    details TEXT NOT NULL DEFAULT '',
+    evaluated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (organization_id, competence_key, rule_code),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (rule_code) REFERENCES comparison_rules(code) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_organization_automatic_rule_results
+    ON organization_automatic_rule_results (organization_id, competence_key, rule_code);
 `;

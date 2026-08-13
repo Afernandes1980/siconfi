@@ -206,6 +206,7 @@ type MscBalanceComparison = {
   exercise?: MscExerciseSummary;
   differences: MscBalanceDifference[];
   status: "compared" | "no_previous";
+  automaticRuleResults: AutomaticRuleResult[];
 };
 
 type AccountNatureIssue = {
@@ -239,6 +240,7 @@ type AccountNatureFilter = "todas" | "corretas" | "invertidas";
 type DimensionItemStatus = "total" | "partial" | "pending" | "not_applicable";
 type AppUser = { id: number; cpf: string; email: string; displayName: string; role: string; active: number; createdAt: string };
 type Organization = { id: number; code: string; name: string; document: string; organizationType: string; state: string; municipality: string; email: string; environment: "demonstration" | "production"; active: number };
+type AutomaticRuleResult = { ruleCode: string; passed: boolean };
 
 export default function CsvComparator({
   currentUser,
@@ -277,6 +279,7 @@ export default function CsvComparator({
   const [balanceExercise, setBalanceExercise] = useState<MscExerciseSummary | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [balanceError, setBalanceError] = useState("");
+  const [automaticRuleResults, setAutomaticRuleResults] = useState<AutomaticRuleResult[]>([]);
   const [activeRegistration, setActiveRegistration] = useState<"users" | "organizations" | null>(null);
   const [activeArea, setActiveArea] = useState<string | null>(null);
   const [openDimensions, setOpenDimensions] = useState<number[]>([]);
@@ -359,6 +362,10 @@ export default function CsvComparator({
     [targetCsv, targetName],
   );
   const accountNatureRows = accountNatureValidation.rows;
+  const automaticResultsByRule = useMemo(
+    () => new Map(automaticRuleResults.map((result) => [result.ruleCode, result.passed])),
+    [automaticRuleResults],
+  );
   const accountNatureIssues = accountNatureRows.filter((row) => row.status === "Invertido");
   const filteredAccountNatureRows = useMemo(() => {
     if (accountNatureFilter === "corretas") {
@@ -434,8 +441,11 @@ export default function CsvComparator({
     let active = true;
     fetch("/api/msc-balances", { cache: "no-store" })
       .then((response) => response.json())
-      .then((data: { exercise?: MscExerciseSummary | null }) => {
-        if (active) setBalanceExercise(data.exercise ?? null);
+      .then((data: { exercise?: MscExerciseSummary | null; automaticRuleResults?: AutomaticRuleResult[] }) => {
+        if (active) {
+          setBalanceExercise(data.exercise ?? null);
+          setAutomaticRuleResults(data.automaticRuleResults ?? []);
+        }
       })
       .catch(() => {
         if (active) setBalanceExercise(null);
@@ -502,6 +512,18 @@ export default function CsvComparator({
 
   async function saveMscBalanceHistory(csv: ParsedCsv, importedName: string) {
     const payload = extractMscBalances(csv);
+    const accountNature = validateAccountNatures(csv, pcaspAccounts);
+    const powerBody = validatePowerBodies(csv, powerBodies);
+    const requiredPowerBody = validateRequiredPowerBodies(csv);
+    const resourceSource = validateResourceSources(csv, resourceSources);
+    const classCoverage = validateAccountClassCoverage(csv);
+    const automaticRuleResults = [
+      ...(powerBody.column && powerBodies.length > 0 ? [{ ruleCode: "D1_00019", passed: powerBody.checked > 0 && powerBody.issues.length === 0 }] : []),
+      ...(accountNature.columns.account && pcaspAccounts.length > 0 ? [{ ruleCode: "D1_00021", passed: accountNature.checked > 0 && accountNature.inverted === 0 && accountNature.withoutNature === 0 }] : []),
+      ...(requiredPowerBody.ic1Column && requiredPowerBody.type1Column ? [{ ruleCode: "D1_00022", passed: requiredPowerBody.issues.length === 0 }] : []),
+      ...(resourceSource.ic2Column && resourceSource.type2Column && resourceSources.length > 0 ? [{ ruleCode: "D1_00027", passed: resourceSource.issues.length === 0 }] : []),
+      ...(classCoverage.accountColumn && classCoverage.valueColumn ? [{ ruleCode: "D1_00028", passed: classCoverage.passed }] : []),
+    ];
     setBalanceComparison(null);
     setBalanceError("");
 
@@ -519,12 +541,13 @@ export default function CsvComparator({
       const response = await fetch("/api/msc-balances", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, sourceFile: importedName }),
+        body: JSON.stringify({ ...payload, sourceFile: importedName, automaticRuleResults }),
       });
       const data = await response.json() as MscBalanceComparison & { error?: string };
       if (!response.ok) throw new Error(data.error || "Nao foi possivel gravar os saldos da MSC.");
       setBalanceComparison(data);
       setBalanceExercise(data.exercise ?? null);
+      setAutomaticRuleResults(data.automaticRuleResults ?? []);
     } catch (error) {
       setBalanceError(error instanceof Error ? error.message : "Nao foi possivel gravar os saldos da MSC.");
     } finally {
@@ -779,6 +802,7 @@ export default function CsvComparator({
             periodicityByRule={periodicityByRule}
             loading={rulesLoading}
             automaticRuleCompleted={dimension === 1 && sourceCsv.rows.length > 0 && pcaspAccounts.length > 0 && accountNatureValidation.checked > 0 && accountNatureValidation.inverted === 0 && accountNatureValidation.withoutNature === 0}
+            automaticResultsByRule={automaticResultsByRule}
             onSelectRule={(code) => setActiveArea(IMPLEMENTED_RULE_AREAS[code] ?? `regra-${code}`)}
           />
         ))}
@@ -811,6 +835,24 @@ export default function CsvComparator({
             onKeyChange={setTargetKey}
           />
         </div>
+
+        {activeArea === "arquivos" && balanceLoading && (
+          <div className="mt-4 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-medium text-cyan-900">
+            Gravando a MSC no ambiente de {currentUser.organizationName ?? "empresa selecionada"}...
+          </div>
+        )}
+
+        {activeArea === "arquivos" && balanceComparison && !balanceLoading && (
+          <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
+            MSC {balanceComparison.competenceKey} importada com sucesso para {currentUser.organizationName ?? "a empresa selecionada"}.
+          </div>
+        )}
+
+        {activeArea === "arquivos" && balanceError && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900">
+            {balanceError}
+          </div>
+        )}
 
         {activeArea === "arquivos" && fileError && (
           <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
@@ -1689,7 +1731,7 @@ export default function CsvComparator({
                   const periodicity = getRulePeriodicity(selectedPeriodicity);
                   const savedPeriods = checksByRule.get(rule.code);
                   const ruleCompleted = Boolean(savedPeriods && [...savedPeriods.values()].some((check) => check.completedDate || check.quantity != null));
-                  const isAutomaticAccountNatureRule = rule.code === "D1_00021";
+                  const isAutomaticAccountNatureRule = automaticResultsByRule.has(rule.code) || IMPLEMENTED_RULE_AREAS[rule.code] !== undefined;
                   const automaticCheckExecuted = isAutomaticAccountNatureRule
                     && sourceCsv.rows.length > 0
                     && pcaspAccounts.length > 0;
@@ -1697,9 +1739,11 @@ export default function CsvComparator({
                     && accountNatureValidation.checked > 0
                     && accountNatureValidation.inverted === 0
                     && accountNatureValidation.withoutNature === 0;
+                  const persistedAutomaticResult = automaticResultsByRule.get(rule.code);
                   const displayedRuleCompleted = isAutomaticAccountNatureRule
-                    ? automaticCheckPassed
+                    ? (persistedAutomaticResult ?? automaticCheckPassed)
                     : ruleCompleted;
+                  const displayedRulePartial = rule.code === "D1_00028" && displayedRuleCompleted;
                   return (
                   <tr key={rule.id} className="hover:bg-slate-50">
                     <td className="break-words px-4 py-3 font-semibold text-slate-800">{rule.dimension}</td>
@@ -1733,7 +1777,7 @@ export default function CsvComparator({
                             const date = check?.completedDate;
                             const quantity = check?.quantity;
                             const hasQuantity = QUANTITY_RULE_CODES.has(rule.code) && quantity !== null && quantity !== undefined;
-                            const periodPassed = isAutomaticAccountNatureRule ? automaticCheckPassed : Boolean(date);
+                            const periodPassed = isAutomaticAccountNatureRule ? (persistedAutomaticResult ?? automaticCheckPassed) : Boolean(date);
                             const periodTitle = isAutomaticAccountNatureRule
                               ? automaticCheckExecuted
                                 ? `Verificação automática executada: ${accountNatureValidation.correct} corretas, ${accountNatureValidation.inverted} invertidas e ${accountNatureValidation.withoutNature} sem natureza`
@@ -1766,7 +1810,7 @@ export default function CsvComparator({
                           ? "bg-emerald-100 text-emerald-700"
                           : "bg-slate-100 text-slate-700"
                       }`}>
-                        {displayedRuleCompleted ? "REALIZADO" : isAutomaticAccountNatureRule ? "PENDENTE" : rule.status}
+                        {displayedRulePartial ? "PARCIAL (1/13)" : displayedRuleCompleted ? "REALIZADO" : isAutomaticAccountNatureRule ? "PENDENTE" : rule.status}
                       </span>
                     </td>
                     <td className="px-2 py-3 text-center">
@@ -2819,6 +2863,7 @@ function DimensionDashboard({
   periodicityByRule,
   loading,
   automaticRuleCompleted,
+  automaticResultsByRule,
   onSelectRule,
 }: {
   dimension: number;
@@ -2828,6 +2873,7 @@ function DimensionDashboard({
   periodicityByRule: Map<string, PeriodicityKey>;
   loading: boolean;
   automaticRuleCompleted: boolean;
+  automaticResultsByRule: Map<string, boolean>;
   onSelectRule: (code: string) => void;
 }) {
   const palette = ["#075985", "#0369a1", "#0284c7", "#1d4ed8"];
@@ -2843,7 +2889,8 @@ function DimensionDashboard({
     let status: DimensionItemStatus = "pending";
 
     if (periodicityKey === "not_applicable" || normalizedStatus.includes("nao aplic")) status = "not_applicable";
-    else if (rule.code === "D1_00021" && automaticRuleCompleted) status = "total";
+    else if (rule.code === "D1_00028" && automaticResultsByRule.get(rule.code) === true) status = "partial";
+    else if (automaticResultsByRule.get(rule.code) === true || (rule.code === "D1_00021" && automaticRuleCompleted)) status = "total";
     else if (completedPeriods > 0 && completedPeriods >= periodicity.periods) status = "total";
     else if (completedPeriods > 0) status = "partial";
     else if (normalizedStatus.includes("realiz") || normalizedStatus.includes("conclu") || normalizedStatus.includes("pontuou total")) status = "total";
