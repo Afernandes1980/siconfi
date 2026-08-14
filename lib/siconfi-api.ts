@@ -70,7 +70,14 @@ export async function fetchSiconfi(resource: SiconfiResource, query: URLSearchPa
   const url = `${SICONFI_BASE_URL}/${resource}?${query.toString()}`;
   return enqueue(async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "Accept-Language": "pt-BR,pt;q=0.9",
+          "User-Agent": "Ranking-Municipal-Siconfi/1.0",
+        },
+        next: { revalidate: 60 },
+      });
       const responseText = await response.text();
       let body: unknown;
       try { body = responseText ? JSON.parse(responseText) : null; } catch { body = responseText; }
