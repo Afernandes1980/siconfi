@@ -203,6 +203,21 @@ scripts/
 
 ## APIs internas
 
+### Integração com a API oficial do Siconfi
+
+`GET /api/siconfi/[recurso]` consulta a API de dados abertos do Tesouro pelo servidor. Os recursos
+aceitos são `entes`, `anexos-relatorios`, `extrato_entregas`, `dca`, `rreo`, `rgf`,
+`msc_patrimonial`, `msc_orcamentaria` e `msc_controle`. A rota exige uma sessão válida, valida os
+filtros e serializa as chamadas para respeitar o limite oficial de uma requisição por segundo.
+
+Exemplo:
+
+```text
+GET /api/siconfi/msc_patrimonial?id_ente=2304400&an_referencia=2025&me_referencia=12&co_tipo_matriz=MSCC&classe_conta=1&id_tv=ending_balance&limit=5000&offset=0
+```
+
+Use `offset` para avançar na paginação indicada pela resposta do Siconfi.
+
 - `GET /api/comparison-rules`: regras importadas, resumo e pacote fiscal oficial.
 - `GET /api/account-natures`: natureza padrão por classe contábil.
 - `GET /api/pcasp-accounts`: contas do PCASP Estendido 2026.

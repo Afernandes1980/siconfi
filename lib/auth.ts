@@ -21,6 +21,7 @@ export type AuthUser = {
   role: string;
   organizationId: number | null;
   organizationName: string | null;
+  organizationCode: string | null;
 };
 
 function hashSessionToken(token: string) {
@@ -75,6 +76,7 @@ export async function authenticateUser(cpf: string, password: string) {
     role: String(row.role),
     organizationId: null,
     organizationName: null,
+    organizationCode: null,
   } satisfies AuthUser;
 }
 
@@ -121,7 +123,7 @@ export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
   const result = await executeAuthQuery(
     `
       SELECT u.id, u.cpf, u.email, u.display_name AS displayName, u.role,
-        o.id AS organizationId, o.name AS organizationName
+        o.id AS organizationId, o.name AS organizationName, o.code AS organizationCode
       FROM app_sessions s
       INNER JOIN app_users u ON u.id = s.user_id
       LEFT JOIN organizations o ON o.id = s.organization_id AND o.active = 1
@@ -144,6 +146,7 @@ export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
     role: String(row.role),
     organizationId: row.organizationId == null ? null : Number(row.organizationId),
     organizationName: row.organizationName == null ? null : String(row.organizationName),
+    organizationCode: row.organizationCode == null ? null : String(row.organizationCode),
   };
 });
 
