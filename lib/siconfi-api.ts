@@ -69,12 +69,19 @@ export function validateSiconfiQuery(resource: SiconfiResource, input: URLSearch
 export async function fetchSiconfi(resource: SiconfiResource, query: URLSearchParams) {
   const url = `${SICONFI_BASE_URL}/${resource}?${query.toString()}`;
   return enqueue(async () => {
-    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
-    const text = await response.text();
-    let body: unknown;
-    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-    if (!response.ok) throw new SiconfiApiError("O Siconfi recusou a consulta.", response.status, body);
-    return body;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
+      const responseText = await response.text();
+      let body: unknown;
+      try { body = responseText ? JSON.parse(responseText) : null; } catch { body = responseText; }
+      if (response.ok) return body;
+      if ((response.status === 400 || response.status === 429) && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1100 + Math.floor(Math.random() * 400)));
+        continue;
+      }
+      throw new SiconfiApiError("O Siconfi recusou a consulta.", response.status, body);
+    }
+    throw new SiconfiApiError("O Siconfi não respondeu à consulta.", 502);
   });
 }
 

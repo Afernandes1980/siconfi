@@ -404,61 +404,25 @@ export default function CsvComparator({
 
   useEffect(() => {
     if (!currentUser.organizationCode) return;
-    fetch("/api/ranking/d1-00001", { cache: "no-store" })
+    fetch("/api/ranking", { cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar a D1_00001.");
-        return data as RreoTimelinessEvaluation;
+        if (!response.ok) throw new Error(data.error ?? "Não foi possível carregar as avaliações automáticas.");
+        return data as {
+          d1_00001: RreoTimelinessEvaluation;
+          d1_00002: DcaTimelinessEvaluation;
+          d1_00003: RgfExecutiveTimelinessEvaluation;
+          d1_00004: RgfExecutiveTimelinessEvaluation;
+          d1_00006: RreoTimelinessEvaluation;
+        };
       })
-      .then(setRreoHomologation)
-      .catch((error) => console.error(error));
-  }, [currentUser.organizationCode]);
-
-  useEffect(() => {
-    if (!currentUser.organizationCode) return;
-    fetch("/api/ranking/d1-00006", { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar a D1_00006.");
-        return data as RreoTimelinessEvaluation;
+      .then((data) => {
+        setRreoHomologation(data.d1_00001);
+        setDcaTimeliness(data.d1_00002);
+        setRgfExecutiveTimeliness(data.d1_00003);
+        setRgfLegislativeTimeliness(data.d1_00004);
+        setRreoTimeliness(data.d1_00006);
       })
-      .then(setRreoTimeliness)
-      .catch((error) => console.error(error));
-  }, [currentUser.organizationCode]);
-
-  useEffect(() => {
-    if (!currentUser.organizationCode) return;
-    fetch("/api/ranking/d1-00004", { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar a D1_00004.");
-        return data as RgfExecutiveTimelinessEvaluation;
-      })
-      .then(setRgfLegislativeTimeliness)
-      .catch((error) => console.error(error));
-  }, [currentUser.organizationCode]);
-
-  useEffect(() => {
-    if (!currentUser.organizationCode) return;
-    fetch("/api/ranking/d1-00003", { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar a D1_00003.");
-        return data as RgfExecutiveTimelinessEvaluation;
-      })
-      .then(setRgfExecutiveTimeliness)
-      .catch((error) => console.error(error));
-  }, [currentUser.organizationCode]);
-
-  useEffect(() => {
-    if (!currentUser.organizationCode) return;
-    fetch("/api/ranking/d1-00002", { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar a D1_00002.");
-        return data as DcaTimelinessEvaluation;
-      })
-      .then(setDcaTimeliness)
       .catch((error) => console.error(error));
   }, [currentUser.organizationCode]);
   const accountNatureIssues = accountNatureRows.filter((row) => row.status === "Invertido");
