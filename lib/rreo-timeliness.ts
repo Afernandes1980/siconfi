@@ -21,7 +21,7 @@ export type RreoPeriodEvaluation = {
 };
 
 export type RreoTimelinessEvaluation = {
-  ruleCode: "D1_00001" | "D1_00006";
+  ruleCode: "D1_00001" | "D1_00006" | "D1_00011";
   exercise: number;
   lastPeriod: number;
   evaluatedPeriods: number;
@@ -87,7 +87,8 @@ export function evaluateRreoHomologation(exercise: number, deliveries: RreoDeliv
     const delivery = rreo
       .filter((item) => Number(item.periodo) === period)
       .sort((a, b) => String(a.data_status ?? "").localeCompare(String(b.data_status ?? "")))[0];
-    const delivered = Boolean(delivery?.data_status) && isAcceptedStatus(delivery?.status_relatorio);
+    const hasDelivery = Boolean(delivery);
+    const delivered = hasDelivery && Boolean(delivery?.data_status) && isAcceptedStatus(delivery?.status_relatorio);
     return {
       period,
       deadline: deadlineFor(exercise, period),
@@ -96,16 +97,39 @@ export function evaluateRreoHomologation(exercise: number, deliveries: RreoDeliv
       delivered,
       timely: delivered,
       deadlineExpired: false,
-      provisional: false,
-      points: delivered ? 1 / 6 : 0,
+      provisional: !hasDelivery,
+      points: delivered || !hasDelivery ? 1 / 6 : 0,
     };
   });
   const homologatedPeriods = periods.filter((item) => item.delivered).length;
-  const points = Number((homologatedPeriods / 6).toFixed(4));
+  const provisionalPeriods = periods.filter((item) => item.provisional).length;
+  const nonHomologatedPeriods = 6 - homologatedPeriods - provisionalPeriods;
+  const points = Number(((6 - nonHomologatedPeriods) / 6).toFixed(4));
   return {
     ruleCode: "D1_00001", exercise, lastPeriod, evaluatedPeriods: 6, timelyPeriods: homologatedPeriods,
-    provisionalPeriods: 0, lateOrMissingPeriods: 6 - homologatedPeriods, points, maximumPoints: 1,
+    provisionalPeriods, lateOrMissingPeriods: nonHomologatedPeriods, points, maximumPoints: 1,
     classification: points === 1 ? "total" : points > 0 ? "partial" : "pending", periods,
+  };
+}
+
+export function evaluateRreoWithoutRectification(exercise: number, deliveries: RreoDelivery[]): RreoTimelinessEvaluation {
+  const evaluation = evaluateRreoHomologation(exercise, deliveries);
+  const periods = evaluation.periods.map((period) => {
+    const rectified = String(period.status ?? "").toUpperCase() === "RT";
+    return rectified ? { ...period, delivered: false, timely: false, provisional: false, points: 0 } : period;
+  });
+  const scoredPeriods = periods.filter((period) => period.points > 0).length;
+  const provisionalPeriods = periods.filter((period) => period.provisional).length;
+  const points = Number(periods.reduce((sum, period) => sum + period.points, 0).toFixed(4));
+  return {
+    ...evaluation,
+    ruleCode: "D1_00011",
+    timelyPeriods: scoredPeriods - provisionalPeriods,
+    provisionalPeriods,
+    lateOrMissingPeriods: 6 - scoredPeriods,
+    points,
+    classification: points === 1 ? "total" : points > 0 ? "partial" : "pending",
+    periods,
   };
 }
 

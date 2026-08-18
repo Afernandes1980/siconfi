@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
-import { evaluateDcaTimeliness } from "@/lib/dca-timeliness";
-import { evaluateRgfExecutiveTimeliness, evaluateRgfLegislativeTimeliness } from "@/lib/rgf-executive-timeliness";
-import { evaluateRreoHomologation, evaluateRreoTimeliness, type RreoDelivery } from "@/lib/rreo-timeliness";
+import { evaluateDcaHomologation, evaluateDcaTimeliness, evaluateDcaWithoutRectification } from "@/lib/dca-timeliness";
+import { evaluateMscDeliveries } from "@/lib/msc-delivery";
+import { evaluateRgfExecutiveHomologation, evaluateRgfExecutiveTimeliness, evaluateRgfExecutiveWithoutRectification, evaluateRgfLegislativeHomologation, evaluateRgfLegislativeTimeliness, evaluateRgfLegislativeWithoutRectification } from "@/lib/rgf-executive-timeliness";
+import { evaluateRreoHomologation, evaluateRreoTimeliness, evaluateRreoWithoutRectification, type RreoDelivery } from "@/lib/rreo-timeliness";
 import { fetchSiconfi, SiconfiApiError } from "@/lib/siconfi-api";
 
 export const runtime = "nodejs";
@@ -21,10 +22,18 @@ export async function GET() {
     const deliveries = response.items ?? [];
     return NextResponse.json({
       d1_00001: evaluateRreoHomologation(RANKING_EXERCISE, deliveries),
-      d1_00002: evaluateDcaTimeliness(RANKING_EXERCISE, deliveries),
-      d1_00003: evaluateRgfExecutiveTimeliness(RANKING_EXERCISE, deliveries),
-      d1_00004: evaluateRgfLegislativeTimeliness(RANKING_EXERCISE, deliveries),
+      d1_00002: evaluateDcaHomologation(RANKING_EXERCISE, deliveries),
+      d1_00003: evaluateRgfExecutiveHomologation(RANKING_EXERCISE, deliveries),
+      d1_00004: evaluateRgfLegislativeHomologation(RANKING_EXERCISE, deliveries),
       d1_00006: evaluateRreoTimeliness(RANKING_EXERCISE, deliveries, new Date(), "D1_00006"),
+      d1_00007: evaluateDcaTimeliness(RANKING_EXERCISE, deliveries),
+      d1_00008: evaluateRgfExecutiveTimeliness(RANKING_EXERCISE, deliveries),
+      d1_00009: evaluateRgfLegislativeTimeliness(RANKING_EXERCISE, deliveries),
+      d1_00011: evaluateRreoWithoutRectification(RANKING_EXERCISE, deliveries),
+      d1_00012: evaluateDcaWithoutRectification(RANKING_EXERCISE, deliveries),
+      d1_00013: evaluateRgfExecutiveWithoutRectification(RANKING_EXERCISE, deliveries),
+      d1_00014: evaluateRgfLegislativeWithoutRectification(RANKING_EXERCISE, deliveries),
+      d1_00016: evaluateMscDeliveries(RANKING_EXERCISE, deliveries),
     }, { headers: { "Cache-Control": "private, max-age=30" } });
   } catch (error) {
     if (error instanceof SiconfiApiError) {

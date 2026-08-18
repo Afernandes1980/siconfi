@@ -28,6 +28,7 @@ const ACCOUNT_CLASS_GROUPS = [
   { label: "Controle", classes: ["7", "8"] },
 ] as const;
 const QUANTITY_RULE_CODES = new Set(["D1_00011", "D1_00012", "D1_00013", "D1_00014"]);
+const ENTITY_NOT_APPLICABLE_RULES = new Set(["D1_00005", "D1_00010", "D1_00015", "D1_00017", "D1_00018"]);
 const DIMENSION_MENUS = [
   { dimension: 1, label: "Dimensão I", total: 44 },
   { dimension: 2, label: "Dimensão II", total: 106 },
@@ -243,7 +244,7 @@ type AppUser = { id: number; cpf: string; email: string; displayName: string; ro
 type Organization = { id: number; code: string; name: string; document: string; organizationType: string; state: string; municipality: string; email: string; environment: "demonstration" | "production"; active: number };
 type AutomaticRuleResult = { ruleCode: string; passed: boolean };
 type RreoTimelinessEvaluation = {
-  ruleCode: "D1_00001" | "D1_00006";
+  ruleCode: "D1_00001" | "D1_00006" | "D1_00011";
   exercise: number;
   lastPeriod: number;
   evaluatedPeriods: number;
@@ -256,7 +257,7 @@ type RreoTimelinessEvaluation = {
   periods: Array<{ period: number; deadline: string; deliveryDate: string | null; status: string | null; delivered: boolean; timely: boolean; deadlineExpired: boolean; provisional: boolean; points: number }>;
 };
 type DcaTimelinessEvaluation = {
-  ruleCode: "D1_00002";
+  ruleCode: "D1_00002" | "D1_00007" | "D1_00012";
   exercise: number;
   deadline: string;
   deliveryDate: string | null;
@@ -269,7 +270,7 @@ type DcaTimelinessEvaluation = {
   classification: "total" | "pending";
 };
 type RgfExecutiveTimelinessEvaluation = {
-  ruleCode: "D1_00003" | "D1_00004";
+  ruleCode: "D1_00003" | "D1_00004" | "D1_00008" | "D1_00009" | "D1_00013" | "D1_00014";
   exercise: number;
   timelyPeriods: number;
   provisionalPeriods: number;
@@ -278,6 +279,47 @@ type RgfExecutiveTimelinessEvaluation = {
   maximumPoints: 1;
   classification: "total" | "partial" | "pending";
   periods: Array<{ period: number; deadline: string; deliveryDate: string | null; status: string | null; delivered: boolean; timely: boolean; deadlineExpired: boolean; provisional: boolean; points: number }>;
+};
+type MscDeliveryEvaluation = {
+  ruleCode: "D1_00016";
+  exercise: number;
+  deliveredMonths: number;
+  missingMonths: number;
+  points: number;
+  maximumPoints: 1;
+  classification: DimensionItemStatus;
+  months: Array<{ month: number; deadline?: string; delivered: boolean; provisional?: boolean; deliveryDate: string | null; institutions: string[]; points: number }>;
+};
+type MscNegativeValuesEvaluation = {
+  ruleCode: "D1_00017";
+  exercise: number;
+  month: number | null;
+  deliveryDate: string | null;
+  checkedRows: number;
+  hasNegativeValues: boolean;
+  points: 0 | 1;
+  classification: "total" | "pending";
+};
+type MscAccountNatureEvaluation = {
+  ruleCode: "D1_00021" | "D1_00025" | "D1_00026";
+  exercise: number;
+  month: number | null;
+  deliveryDate: string | null;
+  checked: number;
+  correct: number;
+  inverted: number;
+  withoutNature: number;
+  points: 0 | 1;
+  classification: "total" | "pending";
+  accounts?: Array<{ account: string; expectedNature: string; actualNature: string; status: "Correta" | "Invertida" | "Sem natureza"; occurrences: number }>;
+};
+type MscApiRulesEvaluation = {
+  exercise: number;
+  month: number | null;
+  previousMonth: number | null;
+  deliveryDate: string | null;
+  checkedRows: number;
+  rules: Array<{ ruleCode: string; passed: boolean; details: string; issues: string[] }>;
 };
 
 export default function CsvComparator({
@@ -320,9 +362,22 @@ export default function CsvComparator({
   const [automaticRuleResults, setAutomaticRuleResults] = useState<AutomaticRuleResult[]>([]);
   const [rreoTimeliness, setRreoTimeliness] = useState<RreoTimelinessEvaluation | null>(null);
   const [rreoHomologation, setRreoHomologation] = useState<RreoTimelinessEvaluation | null>(null);
+  const [rreoWithoutRectification, setRreoWithoutRectification] = useState<RreoTimelinessEvaluation | null>(null);
+  const [dcaHomologation, setDcaHomologation] = useState<DcaTimelinessEvaluation | null>(null);
   const [dcaTimeliness, setDcaTimeliness] = useState<DcaTimelinessEvaluation | null>(null);
+  const [dcaWithoutRectification, setDcaWithoutRectification] = useState<DcaTimelinessEvaluation | null>(null);
+  const [rgfExecutiveHomologation, setRgfExecutiveHomologation] = useState<RgfExecutiveTimelinessEvaluation | null>(null);
   const [rgfExecutiveTimeliness, setRgfExecutiveTimeliness] = useState<RgfExecutiveTimelinessEvaluation | null>(null);
+  const [rgfExecutiveWithoutRectification, setRgfExecutiveWithoutRectification] = useState<RgfExecutiveTimelinessEvaluation | null>(null);
+  const [rgfLegislativeHomologation, setRgfLegislativeHomologation] = useState<RgfExecutiveTimelinessEvaluation | null>(null);
   const [rgfLegislativeTimeliness, setRgfLegislativeTimeliness] = useState<RgfExecutiveTimelinessEvaluation | null>(null);
+  const [rgfLegislativeWithoutRectification, setRgfLegislativeWithoutRectification] = useState<RgfExecutiveTimelinessEvaluation | null>(null);
+  const [mscDeliveries, setMscDeliveries] = useState<MscDeliveryEvaluation | null>(null);
+  const [mscNegativeValues, setMscNegativeValues] = useState<MscNegativeValuesEvaluation | null>(null);
+  const [mscAccountNature, setMscAccountNature] = useState<MscAccountNatureEvaluation | null>(null);
+  const [mscLiabilityNature, setMscLiabilityNature] = useState<MscAccountNatureEvaluation | null>(null);
+  const [mscEquityNature, setMscEquityNature] = useState<MscAccountNatureEvaluation | null>(null);
+  const [mscApiRules, setMscApiRules] = useState<MscApiRulesEvaluation | null>(null);
   const [activeRegistration, setActiveRegistration] = useState<"users" | "organizations" | null>(null);
   const [activeArea, setActiveArea] = useState<string | null>(null);
   const [appUsers, setAppUsers] = useState<AppUser[]>([]);
@@ -414,16 +469,67 @@ export default function CsvComparator({
           d1_00003: RgfExecutiveTimelinessEvaluation;
           d1_00004: RgfExecutiveTimelinessEvaluation;
           d1_00006: RreoTimelinessEvaluation;
+          d1_00007: DcaTimelinessEvaluation;
+          d1_00008: RgfExecutiveTimelinessEvaluation;
+          d1_00009: RgfExecutiveTimelinessEvaluation;
+          d1_00011: RreoTimelinessEvaluation;
+          d1_00012: DcaTimelinessEvaluation;
+          d1_00013: RgfExecutiveTimelinessEvaluation;
+          d1_00014: RgfExecutiveTimelinessEvaluation;
+          d1_00016: MscDeliveryEvaluation;
         };
       })
       .then((data) => {
         setRreoHomologation(data.d1_00001);
-        setDcaTimeliness(data.d1_00002);
-        setRgfExecutiveTimeliness(data.d1_00003);
-        setRgfLegislativeTimeliness(data.d1_00004);
+        setDcaHomologation(data.d1_00002);
+        setRgfExecutiveHomologation(data.d1_00003);
+        setRgfLegislativeHomologation(data.d1_00004);
         setRreoTimeliness(data.d1_00006);
+        setDcaTimeliness(data.d1_00007);
+        setRgfExecutiveTimeliness(data.d1_00008);
+        setRgfLegislativeTimeliness(data.d1_00009);
+        setRreoWithoutRectification(data.d1_00011);
+        setDcaWithoutRectification(data.d1_00012);
+        setRgfExecutiveWithoutRectification(data.d1_00013);
+        setRgfLegislativeWithoutRectification(data.d1_00014);
+        setMscDeliveries(data.d1_00016);
       })
       .catch((error) => console.error(error));
+
+    fetch("/api/ranking/d1-00021", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar a natureza das contas da MSC.");
+        return data as MscAccountNatureEvaluation;
+      })
+      .then(setMscAccountNature)
+      .catch((error) => console.error(error));
+
+    fetch("/api/ranking/msc-rules", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar as regras da MSC pela API.");
+        return data as MscApiRulesEvaluation;
+      })
+      .then((data) => {
+        setMscApiRules(data);
+        setAutomaticRuleResults((current) => {
+          const merged = new Map(current.map((item) => [item.ruleCode, item]));
+          data.rules.forEach((rule) => merged.set(rule.ruleCode, { ruleCode: rule.ruleCode, passed: rule.passed }));
+          return [...merged.values()];
+        });
+      })
+      .catch((error) => console.error(error));
+
+    fetch("/api/ranking/d1-00025-26", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error ?? "Não foi possível avaliar passivo e patrimônio líquido.");
+        return data as { d1_00025: MscAccountNatureEvaluation; d1_00026: MscAccountNatureEvaluation };
+      })
+      .then((data) => { setMscLiabilityNature(data.d1_00025); setMscEquityNature(data.d1_00026); })
+      .catch((error) => console.error(error));
+
   }, [currentUser.organizationCode]);
   const accountNatureIssues = accountNatureRows.filter((row) => row.status === "Invertido");
   const filteredAccountNatureRows = useMemo(() => {
@@ -848,9 +954,21 @@ export default function CsvComparator({
             automaticResultsByRule={automaticResultsByRule}
             rreoTimeliness={rreoTimeliness}
             rreoHomologation={rreoHomologation}
+            rreoWithoutRectification={rreoWithoutRectification}
+            dcaHomologation={dcaHomologation}
             dcaTimeliness={dcaTimeliness}
+            dcaWithoutRectification={dcaWithoutRectification}
+            rgfExecutiveHomologation={rgfExecutiveHomologation}
             rgfExecutiveTimeliness={rgfExecutiveTimeliness}
+            rgfExecutiveWithoutRectification={rgfExecutiveWithoutRectification}
+            rgfLegislativeHomologation={rgfLegislativeHomologation}
             rgfLegislativeTimeliness={rgfLegislativeTimeliness}
+            rgfLegislativeWithoutRectification={rgfLegislativeWithoutRectification}
+            mscDeliveries={mscDeliveries}
+            mscNegativeValues={mscNegativeValues}
+            mscAccountNature={mscAccountNature}
+            mscLiabilityNature={mscLiabilityNature}
+            mscEquityNature={mscEquityNature}
             onSelectRule={(code) => setActiveArea(IMPLEMENTED_RULE_AREAS[code] ?? `regra-${code}`)}
           />
         ))}
@@ -868,20 +986,65 @@ export default function CsvComparator({
             {selectedPendingRule === "D1_00001" && rreoHomologation && (
               <RreoHomologationDetails evaluation={rreoHomologation} />
             )}
-            {selectedPendingRule === "D1_00002" && dcaTimeliness && (
-              <DcaTimelinessDetails evaluation={dcaTimeliness} />
+            {selectedPendingRule === "D1_00002" && dcaHomologation && (
+              <DcaTimelinessDetails evaluation={dcaHomologation} />
             )}
-            {selectedPendingRule === "D1_00003" && rgfExecutiveTimeliness && (
-              <RgfExecutiveTimelinessDetails evaluation={rgfExecutiveTimeliness} />
+            {selectedPendingRule === "D1_00003" && rgfExecutiveHomologation && (
+              <RgfExecutiveTimelinessDetails evaluation={rgfExecutiveHomologation} />
             )}
-            {selectedPendingRule === "D1_00004" && rgfLegislativeTimeliness && (
-              <RgfExecutiveTimelinessDetails evaluation={rgfLegislativeTimeliness} />
+            {selectedPendingRule === "D1_00004" && rgfLegislativeHomologation && (
+              <RgfExecutiveTimelinessDetails evaluation={rgfLegislativeHomologation} />
             )}
             {selectedPendingRule === "D1_00006" && rreoTimeliness && (
               <RreoTimelinessDetails evaluation={rreoTimeliness} />
             )}
+            {selectedPendingRule === "D1_00007" && dcaTimeliness && (
+              <DcaTimelinessDetails evaluation={dcaTimeliness} />
+            )}
+            {selectedPendingRule === "D1_00008" && rgfExecutiveTimeliness && (
+              <RgfExecutiveTimelinessDetails evaluation={rgfExecutiveTimeliness} />
+            )}
+            {selectedPendingRule === "D1_00009" && rgfLegislativeTimeliness && (
+              <RgfExecutiveTimelinessDetails evaluation={rgfLegislativeTimeliness} />
+            )}
+            {selectedPendingRule === "D1_00011" && rreoWithoutRectification && (
+              <RreoHomologationDetails evaluation={rreoWithoutRectification} />
+            )}
+            {selectedPendingRule === "D1_00012" && dcaWithoutRectification && (
+              <DcaTimelinessDetails evaluation={dcaWithoutRectification} />
+            )}
+            {selectedPendingRule === "D1_00013" && rgfExecutiveWithoutRectification && (
+              <RgfExecutiveTimelinessDetails evaluation={rgfExecutiveWithoutRectification} />
+            )}
+            {selectedPendingRule === "D1_00014" && rgfLegislativeWithoutRectification && (
+              <RgfExecutiveTimelinessDetails evaluation={rgfLegislativeWithoutRectification} />
+            )}
+            {selectedPendingRule === "D1_00016" && mscDeliveries && (
+              <MscDeliveryDetails evaluation={mscDeliveries} />
+            )}
+            {selectedPendingRule === "D1_00017" && mscNegativeValues && (
+              <MscNegativeValuesDetails evaluation={mscNegativeValues} />
+            )}
+            {selectedPendingRule === "D1_00021" && mscAccountNature && (
+              <MscAccountNatureDetails evaluation={mscAccountNature} />
+            )}
+            {selectedPendingRule === "D1_00025" && mscLiabilityNature && (
+              <MscAccountNatureDetails evaluation={mscLiabilityNature} />
+            )}
+            {selectedPendingRule === "D1_00026" && mscEquityNature && (
+              <MscAccountNatureDetails evaluation={mscEquityNature} />
+            )}
+            {selectedPendingRule === "D1_00018" && mscApiRules?.rules.find((item) => item.ruleCode === "D1_00018") && (
+              <MscApiRuleDetails evaluation={mscApiRules} rule={mscApiRules.rules.find((item) => item.ruleCode === "D1_00018")!} />
+            )}
           </section>
         )}
+
+        {mscApiRules && activeArea?.startsWith("validacao-d1-") && (() => {
+          const code = `D1_${activeArea.slice("validacao-d1-".length).replace(/-/g, "").padStart(5, "0")}`;
+          const rule = mscApiRules.rules.find((item) => item.ruleCode === code);
+          return rule ? <MscApiRuleDetails evaluation={mscApiRules} rule={rule} /> : null;
+        })()}
 
         {activeArea === "siconfi-api" && (
           <SiconfiExplorer rules={storedRules} organizationCode={currentUser.organizationCode ?? ""} />
@@ -2928,10 +3091,11 @@ function DataPoint({ label, value }: { label: string; value: number }) {
 }
 
 function RreoHomologationDetails({ evaluation }: { evaluation: RreoTimelinessEvaluation }) {
+  const excludesRectification = evaluation.ruleCode === "D1_00011";
   return <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
     <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-3"><div><p className="text-xs font-semibold uppercase text-slate-500">Exercício</p><p className="mt-1 text-xl font-semibold">{evaluation.exercise}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Homologados</p><p className="mt-1 text-xl font-semibold">{evaluation.timelyPeriods} / 6</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} / 1</p></div></div>
-    <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-sm"><thead className="border-y border-slate-200 bg-cyan-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-3">Bimestre</th><th className="px-4 py-3">Homologação</th><th className="px-4 py-3">Resultado</th><th className="px-4 py-3 text-right">Pontos</th></tr></thead><tbody className="divide-y divide-slate-100">{evaluation.periods.map((period) => <tr key={period.period} className="even:bg-slate-50"><td className="px-4 py-3 font-semibold">{period.period}º</td><td className="px-4 py-3">{period.deliveryDate ? formatDateOnly(period.deliveryDate) : "Não localizada"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${period.delivered ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}`}>{period.delivered ? "Homologado" : "Não homologado"}</span></td><td className="px-4 py-3 text-right font-semibold">{period.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}</td></tr>)}</tbody></table></div>
-    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">Cada RREO homologado vale 1/6 de ponto, independentemente da data em que ocorreu a homologação.</p>
+    <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-sm"><thead className="border-y border-slate-200 bg-cyan-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-3">Bimestre</th><th className="px-4 py-3">Homologação</th><th className="px-4 py-3">Resultado</th><th className="px-4 py-3 text-right">Pontos</th></tr></thead><tbody className="divide-y divide-slate-100">{evaluation.periods.map((period) => <tr key={period.period} className="even:bg-slate-50"><td className="px-4 py-3 font-semibold">{period.period}º</td><td className="px-4 py-3">{period.deliveryDate ? formatDateOnly(period.deliveryDate) : "Não localizada"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${period.delivered ? "bg-emerald-100 text-emerald-800" : period.provisional ? "bg-amber-100 text-amber-800" : "bg-rose-100 text-rose-800"}`}>{period.delivered ? "Homologado" : period.provisional ? "Sem registro" : "Não homologado"}</span></td><td className="px-4 py-3 text-right font-semibold">{period.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}</td></tr>)}</tbody></table></div>
+    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">{excludesRectification ? "O item 11 segue a homologação dos RREOs, mas cada bimestre com status Retificado (RT) perde 1/6 de ponto." : "O item inicia com nota cheia. Cada RREO identificado como não homologado desconta 1/6 de ponto; bimestres ainda sem registro mantêm a pontuação."}</p>
   </div>;
 }
 
@@ -2948,30 +3112,79 @@ function RreoTimelinessDetails({ evaluation }: { evaluation: RreoTimelinessEvalu
   </div>;
 }
 
-function formatDateOnly(value: string) {
+function formatDateOnly(value?: string | null) {
+  if (!value) return "Não informado";
   const [year, month, day] = value.slice(0, 10).split("-");
   return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
+function mscDeadlineFor(exercise: number, month: number) {
+  return new Date(Date.UTC(exercise, month + 1, 0)).toISOString().slice(0, 10);
+}
+
 function DcaTimelinessDetails({ evaluation }: { evaluation: DcaTimelinessEvaluation }) {
+  const excludesRectification = evaluation.ruleCode === "D1_00012";
+  const homologationOnly = evaluation.ruleCode === "D1_00002" || excludesRectification;
   return <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
     <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-5">
       <div><p className="text-xs font-semibold uppercase text-slate-500">Exercício</p><p className="mt-1 text-xl font-semibold">{evaluation.exercise}</p></div>
       <div><p className="text-xs font-semibold uppercase text-slate-500">Prazo</p><p className="mt-1 font-semibold">{formatDateOnly(evaluation.deadline)}</p></div>
       <div><p className="text-xs font-semibold uppercase text-slate-500">Homologação</p><p className="mt-1 font-semibold">{evaluation.deliveryDate ? formatDateOnly(evaluation.deliveryDate) : "Não localizada"}</p></div>
-      <div><p className="text-xs font-semibold uppercase text-slate-500">Resultado</p><p className={`mt-1 font-semibold ${evaluation.points ? "text-emerald-700" : "text-rose-700"}`}>{evaluation.timely ? "Tempestiva" : evaluation.provisional ? "No prazo — pontuação provisória" : "Intempestiva/ausente"}</p></div>
+      <div><p className="text-xs font-semibold uppercase text-slate-500">Resultado</p><p className={`mt-1 font-semibold ${evaluation.points ? "text-emerald-700" : "text-rose-700"}`}>{excludesRectification && String(evaluation.status).toUpperCase() === "RT" ? "Retificada — não pontua" : homologationOnly ? evaluation.delivered ? "Homologada" : evaluation.provisional ? "Aguardando homologação — pontuação provisória" : "Não homologada" : evaluation.timely ? "Tempestiva" : evaluation.provisional ? "No prazo — pontuação provisória" : "Intempestiva/ausente"}</p></div>
       <div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points} / 1</p></div>
     </div>
-    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">A DCA deve estar homologada até 30 de abril do ano subsequente. O item mantém 1 ponto enquanto o prazo estiver aberto e perde a pontuação se o prazo for encerrado sem homologação tempestiva.</p>
+    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">{excludesRectification ? "O item 12 segue a homologação da DCA, mas uma entrega com status Retificado (RT) não pontua." : homologationOnly ? "O item 2 considera somente a homologação da DCA e mantém 1 ponto provisório até a data-limite do item 7. Uma DCA homologada conserva a pontuação, ainda que a homologação seja posterior ao prazo." : "O item 7 verifica a tempestividade. A DCA deve estar homologada até 30 de abril do ano subsequente; enquanto o prazo estiver aberto, o ponto é mantido provisoriamente."}</p>
   </div>;
 }
 
 function RgfExecutiveTimelinessDetails({ evaluation }: { evaluation: RgfExecutiveTimelinessEvaluation }) {
+  const excludesRectification = evaluation.ruleCode === "D1_00013" || evaluation.ruleCode === "D1_00014";
+  const homologationOnly = evaluation.ruleCode === "D1_00003" || evaluation.ruleCode === "D1_00004" || excludesRectification;
+  const powerLabel = evaluation.ruleCode === "D1_00004" || evaluation.ruleCode === "D1_00009" || evaluation.ruleCode === "D1_00014" ? "Legislativo" : "Executivo";
   return <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
-    <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-4"><div><p className="text-xs font-semibold uppercase text-slate-500">Exercício</p><p className="mt-1 text-xl font-semibold">{evaluation.exercise}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Tempestivos</p><p className="mt-1 text-xl font-semibold">{evaluation.timelyPeriods}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">No prazo</p><p className="mt-1 text-xl font-semibold">{evaluation.provisionalPeriods}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} / 1</p></div></div>
-    <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-y border-slate-200 bg-cyan-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-3">Quadrimestre</th><th className="px-4 py-3">Prazo</th><th className="px-4 py-3">Homologação</th><th className="px-4 py-3">Resultado</th><th className="px-4 py-3 text-right">Pontos</th></tr></thead><tbody className="divide-y divide-slate-100">{evaluation.periods.map((period) => <tr key={period.period} className="even:bg-slate-50"><td className="px-4 py-3 font-semibold">{period.period}º</td><td className="px-4 py-3">{formatDateOnly(period.deadline)}</td><td className="px-4 py-3">{period.deliveryDate ? formatDateOnly(period.deliveryDate) : "Não localizada"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${period.timely ? "bg-emerald-100 text-emerald-800" : period.provisional ? "bg-cyan-100 text-cyan-800" : "bg-rose-100 text-rose-800"}`}>{period.timely ? "Tempestivo" : period.provisional ? "No prazo — provisório" : "Intempestivo/ausente"}</span></td><td className="px-4 py-3 text-right font-semibold">{period.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}</td></tr>)}</tbody></table></div>
-    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">Cada quadrimestre vale 1/3 de ponto. A parcela permanece pontuando enquanto seu prazo estiver aberto e é perdida após o vencimento sem homologação tempestiva.</p>
+    <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-4"><div><p className="text-xs font-semibold uppercase text-slate-500">Exercício</p><p className="mt-1 text-xl font-semibold">{evaluation.exercise}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">{homologationOnly ? "Homologados" : "Tempestivos"}</p><p className="mt-1 text-xl font-semibold">{evaluation.timelyPeriods}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">No prazo</p><p className="mt-1 text-xl font-semibold">{evaluation.provisionalPeriods}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} / 1</p></div></div>
+    <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-y border-slate-200 bg-cyan-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-3">Quadrimestre</th><th className="px-4 py-3">Prazo</th><th className="px-4 py-3">Homologação</th><th className="px-4 py-3">Resultado</th><th className="px-4 py-3 text-right">Pontos</th></tr></thead><tbody className="divide-y divide-slate-100">{evaluation.periods.map((period) => <tr key={period.period} className="even:bg-slate-50"><td className="px-4 py-3 font-semibold">{period.period}º</td><td className="px-4 py-3">{formatDateOnly(period.deadline)}</td><td className="px-4 py-3">{period.deliveryDate ? formatDateOnly(period.deliveryDate) : "Não localizada"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(homologationOnly ? period.delivered : period.timely) ? "bg-emerald-100 text-emerald-800" : period.provisional ? "bg-cyan-100 text-cyan-800" : "bg-rose-100 text-rose-800"}`}>{homologationOnly ? period.delivered ? "Homologado" : period.provisional ? "No prazo — provisório" : "Prazo vencido — não homologado" : period.timely ? "Tempestivo" : period.provisional ? "No prazo — provisório" : "Intempestivo/ausente"}</span></td><td className="px-4 py-3 text-right font-semibold">{period.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}</td></tr>)}</tbody></table></div>
+    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">{excludesRectification ? `Este item segue a homologação dos RGFs do ${powerLabel}, mas cada quadrimestre com status Retificado (RT) perde 1/3 de ponto.` : homologationOnly ? `Este item verifica a homologação do RGF do ${powerLabel}. Cada quadrimestre vale 1/3 e mantém a parcela enquanto estiver no prazo; após o vencimento, deixa de pontuar até que seja homologado.` : `Este item verifica a tempestividade do RGF do ${powerLabel}. Cada quadrimestre vale 1/3 de ponto; a parcela permanece pontuando enquanto seu prazo estiver aberto.`}</p>
   </div>;
+}
+
+function MscDeliveryDetails({ evaluation }: { evaluation: MscDeliveryEvaluation }) {
+  return <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+    <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-3"><div><p className="text-xs font-semibold uppercase text-slate-500">Exercício</p><p className="mt-1 text-xl font-semibold">{evaluation.exercise}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Meses enviados</p><p className="mt-1 text-xl font-semibold">{evaluation.deliveredMonths} / 12</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })} / 1</p></div></div>
+    <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="border-y border-slate-200 bg-cyan-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-3">Competência</th><th className="px-4 py-3">Prazo</th><th className="px-4 py-3">Envio</th><th className="px-4 py-3">Resultado</th><th className="px-4 py-3 text-right">Pontos</th></tr></thead><tbody className="divide-y divide-slate-100">{evaluation.months.map((month) => <tr key={month.month} className="even:bg-slate-50"><td className="px-4 py-3 font-semibold">{String(month.month).padStart(2, "0")}/{evaluation.exercise}</td><td className="px-4 py-3">{formatDateOnly(month.deadline ?? mscDeadlineFor(evaluation.exercise, month.month))}</td><td className="px-4 py-3">{month.deliveryDate ? formatDateOnly(month.deliveryDate) : "Não localizado"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${month.delivered ? "bg-emerald-100 text-emerald-800" : month.provisional ? "bg-cyan-100 text-cyan-800" : "bg-rose-100 text-rose-800"}`}>{month.delivered ? "Enviada" : month.provisional ? "No prazo — provisório" : "Prazo vencido — não enviada"}</span></td><td className="px-4 py-3 text-right font-semibold">{month.points.toLocaleString("pt-BR", { maximumFractionDigits: 4 })}</td></tr>)}</tbody></table></div>
+    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">O item 16 inicia com nota cheia. Cada competência mantém 1/12 enquanto estiver no prazo e perde a parcela somente após o vencimento sem envio; Prefeitura e Câmara são consolidadas por mês.</p>
+  </div>;
+}
+
+function MscNegativeValuesDetails({ evaluation }: { evaluation: MscNegativeValuesEvaluation }) {
+  const hasMatrix = evaluation.month !== null;
+  return <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+    <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-4"><div><p className="text-xs font-semibold uppercase text-slate-500">Exercício</p><p className="mt-1 text-xl font-semibold">{evaluation.exercise}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Última competência</p><p className="mt-1 text-xl font-semibold">{evaluation.month ? `${String(evaluation.month).padStart(2, "0")}/${evaluation.exercise}` : "Não localizada"}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Linhas verificadas</p><p className="mt-1 text-xl font-semibold">{evaluation.checkedRows.toLocaleString("pt-BR")}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points} / 1</p></div></div>
+    <div className={`border-t px-4 py-4 text-sm font-semibold ${evaluation.hasNegativeValues ? "border-rose-200 bg-rose-50 text-rose-800" : hasMatrix ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>{evaluation.hasNegativeValues ? "A última MSC enviada possui valor negativo e não pontua." : hasMatrix ? "Nenhum valor negativo foi encontrado na última MSC enviada." : "Nenhuma MSC enviada foi localizada para avaliação."}</div>
+    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">A consulta usa a MSC Agregada com data de envio mais recente e verifica classes 1 a 8 nos saldos inicial, movimento e saldo final. Os endpoints do Siconfi retornam os dados vigentes da última matriz enviada para a competência.</p>
+  </div>;
+}
+
+function MscAccountNatureDetails({ evaluation }: { evaluation: MscAccountNatureEvaluation }) {
+  const passed = evaluation.points === 1;
+  const accounts = evaluation.accounts ?? [];
+  const groupLabel = evaluation.ruleCode === "D1_00025" ? "passivo" : evaluation.ruleCode === "D1_00026" ? "patrimônio líquido" : "ativo";
+  return <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+    <div className="grid gap-4 bg-slate-50 p-4 sm:grid-cols-5"><div><p className="text-xs font-semibold uppercase text-slate-500">Última competência</p><p className="mt-1 text-xl font-semibold">{evaluation.month ? `${String(evaluation.month).padStart(2, "0")}/${evaluation.exercise}` : "Não localizada"}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Verificadas</p><p className="mt-1 text-xl font-semibold">{evaluation.checked.toLocaleString("pt-BR")}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Corretas</p><p className="mt-1 text-xl font-semibold">{evaluation.correct.toLocaleString("pt-BR")}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Invertidas/sem natureza</p><p className="mt-1 text-xl font-semibold">{(evaluation.inverted + evaluation.withoutNature).toLocaleString("pt-BR")}</p></div><div><p className="text-xs font-semibold uppercase text-slate-500">Pontuação</p><p className="mt-1 text-xl font-semibold">{evaluation.points} / 1</p></div></div>
+    <div className={`border-t px-4 py-4 text-sm font-semibold ${passed ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"}`}>{passed ? `As contas do ${groupLabel} da última MSC possuem natureza compatível com o PCASP.` : evaluation.month ? `A última MSC possui conta do ${groupLabel} invertida, sem natureza ou não localizada no PCASP.` : "Nenhuma MSC enviada foi localizada para avaliação."}</div>
+    {accounts.length > 0 && <div className="max-h-[520px] overflow-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="sticky top-0 border-y border-slate-200 bg-cyan-50 text-xs uppercase text-slate-600"><tr><th className="px-4 py-3">Conta analisada</th><th className="px-4 py-3">Natureza esperada</th><th className="px-4 py-3">Natureza informada</th><th className="px-4 py-3">Situação</th><th className="px-4 py-3 text-right">Ocorrências</th></tr></thead><tbody className="divide-y divide-slate-100">{accounts.map((account, index) => <tr key={`${account.account}-${account.actualNature}-${account.status}-${index}`} className={account.status === "Correta" ? "even:bg-slate-50" : "bg-rose-50 text-rose-900"}><td className="px-4 py-3 font-mono font-semibold">{account.account}</td><td className="px-4 py-3">{account.expectedNature}</td><td className="px-4 py-3 font-semibold">{account.actualNature}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${account.status === "Correta" ? "bg-emerald-100 text-emerald-800" : "bg-rose-200 text-rose-900"}`}>{account.status}</span></td><td className="px-4 py-3 text-right font-semibold">{account.occurrences.toLocaleString("pt-BR")}</td></tr>)}</tbody></table></div>}
+    {evaluation.month && accounts.length === 0 && <p className="border-t border-slate-200 px-4 py-4 text-sm text-slate-600">A resposta atual não trouxe o detalhamento das contas. Atualize a página para executar novamente a verificação pela API.</p>}
+    <p className="border-t border-slate-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">A regra da importação manual foi mantida: saldo final diferente de zero, comparando a natureza informada com o PCASP. A API usa sempre a competência da MSC com envio mais recente.</p>
+  </div>;
+}
+
+function MscApiRuleDetails({ evaluation, rule }: { evaluation: MscApiRulesEvaluation; rule: MscApiRulesEvaluation["rules"][number] }) {
+  return <section className="panel mt-5 p-5">
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Avaliação pela API do Siconfi</p><h3 className="mt-1 text-lg font-semibold text-slate-950">{rule.ruleCode} · última MSC enviada</h3><p className="mt-1 text-sm text-slate-600">Competência {evaluation.month ? `${String(evaluation.month).padStart(2, "0")}/${evaluation.exercise}` : "não localizada"}{rule.ruleCode === "D1_00024" && evaluation.previousMonth ? `, comparada com ${String(evaluation.previousMonth).padStart(2, "0")}/${evaluation.exercise}` : ""} · {evaluation.checkedRows.toLocaleString("pt-BR")} linhas lidas.</p></div><span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${rule.passed ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{rule.passed ? "Pontuou" : "Não pontuou"}</span></div>
+    <p className="mt-4 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-700">{rule.details}</p>
+    {rule.issues.length > 0 && <div className="mt-3"><p className="text-xs font-semibold uppercase text-rose-700">Inconsistências encontradas</p><div className="mt-2 flex flex-wrap gap-2">{rule.issues.map((issue) => <span key={issue} className="rounded-md bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-800">{issue}</span>)}</div></div>}
+    {(rule.ruleCode === "D1_00022" || rule.ruleCode === "D1_00027") && <p className="mt-4 text-xs text-amber-800">A API permite validar os códigos preenchidos, mas não expõe TIPO1/TIPO2 para identificar campos obrigatórios ausentes com a mesma fidelidade do arquivo CSV.</p>}
+  </section>;
 }
 
 function DimensionDashboard({
@@ -2985,9 +3198,21 @@ function DimensionDashboard({
   automaticResultsByRule,
   rreoTimeliness,
   rreoHomologation,
+  rreoWithoutRectification,
+  dcaHomologation,
   dcaTimeliness,
+  dcaWithoutRectification,
+  rgfExecutiveHomologation,
   rgfExecutiveTimeliness,
+  rgfExecutiveWithoutRectification,
+  rgfLegislativeHomologation,
   rgfLegislativeTimeliness,
+  rgfLegislativeWithoutRectification,
+  mscDeliveries,
+  mscNegativeValues,
+  mscAccountNature,
+  mscLiabilityNature,
+  mscEquityNature,
   onSelectRule,
 }: {
   dimension: number;
@@ -3000,9 +3225,21 @@ function DimensionDashboard({
   automaticResultsByRule: Map<string, boolean>;
   rreoTimeliness: RreoTimelinessEvaluation | null;
   rreoHomologation: RreoTimelinessEvaluation | null;
+  rreoWithoutRectification: RreoTimelinessEvaluation | null;
+  dcaHomologation: DcaTimelinessEvaluation | null;
   dcaTimeliness: DcaTimelinessEvaluation | null;
+  dcaWithoutRectification: DcaTimelinessEvaluation | null;
+  rgfExecutiveHomologation: RgfExecutiveTimelinessEvaluation | null;
   rgfExecutiveTimeliness: RgfExecutiveTimelinessEvaluation | null;
+  rgfExecutiveWithoutRectification: RgfExecutiveTimelinessEvaluation | null;
+  rgfLegislativeHomologation: RgfExecutiveTimelinessEvaluation | null;
   rgfLegislativeTimeliness: RgfExecutiveTimelinessEvaluation | null;
+  rgfLegislativeWithoutRectification: RgfExecutiveTimelinessEvaluation | null;
+  mscDeliveries: MscDeliveryEvaluation | null;
+  mscNegativeValues: MscNegativeValuesEvaluation | null;
+  mscAccountNature: MscAccountNatureEvaluation | null;
+  mscLiabilityNature: MscAccountNatureEvaluation | null;
+  mscEquityNature: MscAccountNatureEvaluation | null;
   onSelectRule: (code: string) => void;
 }) {
   const palette = ["#075985", "#0369a1", "#0284c7", "#1d4ed8"];
@@ -3017,14 +3254,28 @@ function DimensionDashboard({
     const normalizedStatus = normalizeSearch(rule.status);
     let status: DimensionItemStatus = "pending";
 
-    if (rule.code === "D1_00001" && rreoHomologation) status = rreoHomologation.classification;
-    else if (rule.code === "D1_00002" && dcaTimeliness) status = dcaTimeliness.classification;
-    else if (rule.code === "D1_00003" && rgfExecutiveTimeliness) status = rgfExecutiveTimeliness.classification;
-    else if (rule.code === "D1_00004" && rgfLegislativeTimeliness) status = rgfLegislativeTimeliness.classification;
+    if (ENTITY_NOT_APPLICABLE_RULES.has(rule.code)) status = "not_applicable";
+    else if (rule.code === "D1_00001" && rreoHomologation) status = rreoHomologation.classification;
+    else if (rule.code === "D1_00002" && dcaHomologation) status = dcaHomologation.classification;
+    else if (rule.code === "D1_00003" && rgfExecutiveHomologation) status = rgfExecutiveHomologation.classification;
+    else if (rule.code === "D1_00004" && rgfLegislativeHomologation) status = rgfLegislativeHomologation.classification;
     else if (rule.code === "D1_00006" && rreoTimeliness) status = rreoTimeliness.classification;
+    else if (rule.code === "D1_00007" && dcaTimeliness) status = dcaTimeliness.classification;
+    else if (rule.code === "D1_00008" && rgfExecutiveTimeliness) status = rgfExecutiveTimeliness.classification;
+    else if (rule.code === "D1_00009" && rgfLegislativeTimeliness) status = rgfLegislativeTimeliness.classification;
+    else if (rule.code === "D1_00011" && rreoWithoutRectification) status = rreoWithoutRectification.classification;
+    else if (rule.code === "D1_00012" && dcaWithoutRectification) status = dcaWithoutRectification.classification;
+    else if (rule.code === "D1_00013" && rgfExecutiveWithoutRectification) status = rgfExecutiveWithoutRectification.classification;
+    else if (rule.code === "D1_00014" && rgfLegislativeWithoutRectification) status = rgfLegislativeWithoutRectification.classification;
+    else if (rule.code === "D1_00016" && mscDeliveries) status = mscDeliveries.classification;
+    else if (rule.code === "D1_00017" && mscNegativeValues) status = mscNegativeValues.classification;
+    else if (rule.code === "D1_00021" && mscAccountNature) status = mscAccountNature.classification;
+    else if (rule.code === "D1_00025" && mscLiabilityNature) status = mscLiabilityNature.classification;
+    else if (rule.code === "D1_00026" && mscEquityNature) status = mscEquityNature.classification;
     else if (periodicityKey === "not_applicable" || normalizedStatus.includes("nao aplic")) status = "not_applicable";
     else if (rule.code === "D1_00028" && automaticResultsByRule.get(rule.code) === true) status = "partial";
     else if (automaticResultsByRule.get(rule.code) === true || (rule.code === "D1_00021" && automaticRuleCompleted)) status = "total";
+    else if (automaticResultsByRule.has(rule.code)) status = "pending";
     else if (completedPeriods > 0 && completedPeriods >= periodicity.periods) status = "total";
     else if (completedPeriods > 0) status = "partial";
     else if (normalizedStatus.includes("realiz") || normalizedStatus.includes("conclu") || normalizedStatus.includes("pontuou total")) status = "total";
@@ -3032,14 +3283,38 @@ function DimensionDashboard({
 
     const points = rule.code === "D1_00001" && rreoHomologation
       ? rreoHomologation.points
-      : rule.code === "D1_00002" && dcaTimeliness
-        ? dcaTimeliness.points
-        : rule.code === "D1_00003" && rgfExecutiveTimeliness
-          ? rgfExecutiveTimeliness.points
-          : rule.code === "D1_00004" && rgfLegislativeTimeliness
-            ? rgfLegislativeTimeliness.points
+      : rule.code === "D1_00002" && dcaHomologation
+        ? dcaHomologation.points
+        : rule.code === "D1_00003" && rgfExecutiveHomologation
+          ? rgfExecutiveHomologation.points
+          : rule.code === "D1_00004" && rgfLegislativeHomologation
+            ? rgfLegislativeHomologation.points
             : rule.code === "D1_00006" && rreoTimeliness
               ? rreoTimeliness.points
+              : rule.code === "D1_00007" && dcaTimeliness
+                ? dcaTimeliness.points
+                : rule.code === "D1_00008" && rgfExecutiveTimeliness
+                  ? rgfExecutiveTimeliness.points
+                  : rule.code === "D1_00009" && rgfLegislativeTimeliness
+                    ? rgfLegislativeTimeliness.points
+                    : rule.code === "D1_00011" && rreoWithoutRectification
+                      ? rreoWithoutRectification.points
+                      : rule.code === "D1_00012" && dcaWithoutRectification
+                        ? dcaWithoutRectification.points
+                        : rule.code === "D1_00013" && rgfExecutiveWithoutRectification
+                          ? rgfExecutiveWithoutRectification.points
+                          : rule.code === "D1_00014" && rgfLegislativeWithoutRectification
+                            ? rgfLegislativeWithoutRectification.points
+                            : rule.code === "D1_00016" && mscDeliveries
+                              ? mscDeliveries.points
+                              : rule.code === "D1_00017" && mscNegativeValues
+                                ? mscNegativeValues.points
+                                : rule.code === "D1_00021" && mscAccountNature
+                                  ? mscAccountNature.points
+                                  : rule.code === "D1_00025" && mscLiabilityNature
+                                    ? mscLiabilityNature.points
+                                    : rule.code === "D1_00026" && mscEquityNature
+                                      ? mscEquityNature.points
         : status === "total" ? 1 : status === "partial" ? 0.5 : 0;
     return { rule, status, points };
   });
@@ -3090,7 +3365,7 @@ function DimensionDashboard({
           </div>
           <div className="mt-7 flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-slate-950">Mapa dos itens</h3><p className="mt-1 text-sm text-slate-500">Clique em um item para abrir seus detalhes.</p></div><span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">{counts.pending} ajustes pendentes</span></div>
           <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7 md:grid-cols-9 xl:grid-cols-12">
-            {items.map(({ rule, status }) => <button key={rule.code} type="button" onClick={() => onSelectRule(rule.code)} title={`${rule.code} — ${rule.item}`} className={`relative min-h-12 rounded-md border px-1 py-2 text-xs font-bold transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 ${statusStyle[status]}`}>{Number(rule.code.split("_")[1])}<span className="sr-only">: {rule.item}</span>{status === "not_applicable" && <span aria-hidden="true" className="absolute inset-0 grid place-items-center text-2xl font-light text-sky-700/70">×</span>}</button>)}
+            {items.map(({ rule, status }) => <button key={rule.code} type="button" onClick={() => onSelectRule(rule.code)} title={`${rule.code} — ${rule.item}${ENTITY_NOT_APPLICABLE_RULES.has(rule.code) ? " (não aplicável a esta entidade)" : ""}`} className={`relative min-h-12 overflow-hidden rounded-md border px-1 py-2 text-xs font-bold transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600 ${statusStyle[status]}`}>{Number(rule.code.split("_")[1])}<span className="sr-only">: {rule.item}</span>{ENTITY_NOT_APPLICABLE_RULES.has(rule.code) ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 grid place-items-center"><svg viewBox="0 0 44 40" className="h-10 w-11 drop-shadow-sm"><path d="M22 2 42 37H2Z" fill="#facc15" stroke="#000000" strokeWidth="3" strokeLinejoin="round"/><text x="22" y="30" textAnchor="middle" fontSize="25" fontWeight="900" fill="#000000">!</text></svg></span> : status === "not_applicable" && <span aria-hidden="true" className="absolute inset-0 grid place-items-center text-2xl font-light text-sky-700/70">×</span>}</button>)}
           </div>
         </div>
       )}

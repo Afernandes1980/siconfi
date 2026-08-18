@@ -13,7 +13,7 @@ export type RgfExecutivePeriodEvaluation = {
 };
 
 export type RgfExecutiveTimelinessEvaluation = {
-  ruleCode: "D1_00003" | "D1_00004";
+  ruleCode: "D1_00003" | "D1_00004" | "D1_00008" | "D1_00009" | "D1_00013" | "D1_00014";
   exercise: number;
   timelyPeriods: number;
   provisionalPeriods: number;
@@ -25,14 +25,62 @@ export type RgfExecutiveTimelinessEvaluation = {
 };
 
 export function evaluateRgfExecutiveTimeliness(exercise: number, deliveries: RreoDelivery[], today = new Date()): RgfExecutiveTimelinessEvaluation {
-  return evaluateRgfTimeliness(exercise, deliveries, "D1_00003", "executive", today);
+  return evaluateRgf(exercise, deliveries, "D1_00008", "executive", today, "timeliness");
+}
+
+export function evaluateRgfExecutiveHomologation(exercise: number, deliveries: RreoDelivery[], today = new Date()): RgfExecutiveTimelinessEvaluation {
+  return evaluateRgf(exercise, deliveries, "D1_00003", "executive", today, "homologation");
+}
+
+export function evaluateRgfExecutiveWithoutRectification(exercise: number, deliveries: RreoDelivery[], today = new Date()): RgfExecutiveTimelinessEvaluation {
+  const evaluation = evaluateRgfExecutiveHomologation(exercise, deliveries, today);
+  const periods = evaluation.periods.map((period) => String(period.status ?? "").toUpperCase() === "RT"
+    ? { ...period, delivered: false, timely: false, provisional: false, points: 0 }
+    : period);
+  const scoredPeriods = periods.filter((period) => period.points > 0).length;
+  const provisionalPeriods = periods.filter((period) => period.provisional).length;
+  const points = Number(periods.reduce((sum, period) => sum + period.points, 0).toFixed(4));
+  return {
+    ...evaluation,
+    ruleCode: "D1_00013",
+    timelyPeriods: scoredPeriods - provisionalPeriods,
+    provisionalPeriods,
+    failedPeriods: periods.length - scoredPeriods,
+    points,
+    classification: points === 1 ? "total" : points > 0 ? "partial" : "pending",
+    periods,
+  };
 }
 
 export function evaluateRgfLegislativeTimeliness(exercise: number, deliveries: RreoDelivery[], today = new Date()): RgfExecutiveTimelinessEvaluation {
-  return evaluateRgfTimeliness(exercise, deliveries, "D1_00004", "legislative", today);
+  return evaluateRgf(exercise, deliveries, "D1_00009", "legislative", today, "timeliness");
 }
 
-function evaluateRgfTimeliness(exercise: number, deliveries: RreoDelivery[], ruleCode: "D1_00003" | "D1_00004", power: "executive" | "legislative", today: Date): RgfExecutiveTimelinessEvaluation {
+export function evaluateRgfLegislativeHomologation(exercise: number, deliveries: RreoDelivery[], today = new Date()): RgfExecutiveTimelinessEvaluation {
+  return evaluateRgf(exercise, deliveries, "D1_00004", "legislative", today, "homologation");
+}
+
+export function evaluateRgfLegislativeWithoutRectification(exercise: number, deliveries: RreoDelivery[], today = new Date()): RgfExecutiveTimelinessEvaluation {
+  const evaluation = evaluateRgfLegislativeHomologation(exercise, deliveries, today);
+  const periods = evaluation.periods.map((period) => String(period.status ?? "").toUpperCase() === "RT"
+    ? { ...period, delivered: false, timely: false, provisional: false, points: 0 }
+    : period);
+  const scoredPeriods = periods.filter((period) => period.points > 0).length;
+  const provisionalPeriods = periods.filter((period) => period.provisional).length;
+  const points = Number(periods.reduce((sum, period) => sum + period.points, 0).toFixed(4));
+  return {
+    ...evaluation,
+    ruleCode: "D1_00014",
+    timelyPeriods: scoredPeriods - provisionalPeriods,
+    provisionalPeriods,
+    failedPeriods: periods.length - scoredPeriods,
+    points,
+    classification: points === 1 ? "total" : points > 0 ? "partial" : "pending",
+    periods,
+  };
+}
+
+function evaluateRgf(exercise: number, deliveries: RreoDelivery[], ruleCode: "D1_00003" | "D1_00004" | "D1_00008" | "D1_00009", power: "executive" | "legislative", today: Date, criterion: "homologation" | "timeliness"): RgfExecutiveTimelinessEvaluation {
   const selectedDeliveries = deliveries.filter((item) => {
     const deliverable = normalize(item.entregavel);
     const institution = normalize(item.instituicao);
@@ -52,9 +100,10 @@ function evaluateRgfTimeliness(exercise: number, deliveries: RreoDelivery[], rul
     const timely = delivered && String(delivery?.data_status).slice(0, 10) <= deadline;
     const deadlineExpired = todayKey > deadline;
     const provisional = !delivered && !deadlineExpired;
-    return { period, deadline, deliveryDate: delivery?.data_status ?? null, status: delivery?.status_relatorio ?? null, delivered, timely, deadlineExpired, provisional, points: timely || provisional ? 1 / 3 : 0 };
+    const scores = criterion === "homologation" ? delivered || provisional : timely || provisional;
+    return { period, deadline, deliveryDate: delivery?.data_status ?? null, status: delivery?.status_relatorio ?? null, delivered, timely, deadlineExpired, provisional, points: scores ? 1 / 3 : 0 };
   });
-  const timelyPeriods = periods.filter((item) => item.timely).length;
+  const timelyPeriods = periods.filter((item) => criterion === "homologation" ? item.delivered : item.timely).length;
   const provisionalPeriods = periods.filter((item) => item.provisional).length;
   const failedPeriods = periods.length - timelyPeriods - provisionalPeriods;
   const points = Number(periods.reduce((sum, item) => sum + item.points, 0).toFixed(4));
